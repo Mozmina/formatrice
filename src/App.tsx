@@ -36,7 +36,10 @@ import {
   onSnapshot, 
   deleteDoc, 
   getDocs,
-  DocumentData
+  DocumentData,
+  DocumentSnapshot,
+  QuerySnapshot,
+  QueryDocumentSnapshot
 } from 'firebase/firestore';
 
 // --- FIREBASE CONFIG ---
@@ -262,7 +265,8 @@ export default function SafetyTrainingApp() {
     };
     initAuth();
     
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    // Ajout du type explicite pour 'u'
+    const unsubscribe = onAuthStateChanged(auth, (u: User | null) => {
       setUser(u);
     });
     return () => unsubscribe();
@@ -272,7 +276,8 @@ export default function SafetyTrainingApp() {
   useEffect(() => {
     if (!user) return;
     
-    const unsubscribe = onSnapshot(getScenarioDocRef(), (docSnap) => {
+    // Ajout du type explicite pour 'docSnap'
+    const unsubscribe = onSnapshot(getScenarioDocRef(), (docSnap: DocumentSnapshot) => {
       if (docSnap.exists()) {
         const data = docSnap.data() as Partial<ScenarioConfig>;
         const newConfig: ScenarioConfig = {
@@ -291,8 +296,9 @@ export default function SafetyTrainingApp() {
   useEffect(() => {
     if (!user) return;
 
-    const unsubscribe = onSnapshot(getResponsesRef(), (snapshot) => {
-      const responses = snapshot.docs.map(doc => doc.data());
+    // Ajout du type explicite pour 'snapshot' et 'doc'
+    const unsubscribe = onSnapshot(getResponsesRef(), (snapshot: QuerySnapshot) => {
+      const responses = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());
       setGroupData(responses);
     });
     return () => unsubscribe();
@@ -389,7 +395,8 @@ export default function SafetyTrainingApp() {
     if (window.confirm("Êtes-vous sûr de vouloir effacer TOUTES les réponses des apprenants ? Cette action est irréversible.")) {
       try {
         const querySnapshot = await getDocs(getResponsesRef());
-        const deletePromises = querySnapshot.docs.map(d => deleteDoc(d.ref));
+        // Ajout du type explicite pour 'd'
+        const deletePromises = querySnapshot.docs.map((d: QueryDocumentSnapshot) => deleteDoc(d.ref));
         await Promise.all(deletePromises);
         alert("Base de données effacée.");
       } catch (e) {
