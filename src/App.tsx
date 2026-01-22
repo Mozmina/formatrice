@@ -928,7 +928,7 @@ export default function App() {
             <div className="bg-yellow-400 w-8 h-8 flex items-center justify-center rounded text-slate-900">
               <Activity size={20} />
             </div>
-            SÉCURITÉ<span className="text-yellow-600">BTP</span>
+            BTP CFA<span className="text-yellow-600">MARNE</span>
           </div>
           <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Formation Interactive</div>
         </div>
