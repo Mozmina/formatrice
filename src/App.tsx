@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type ReactNode, type ElementType, type SyntheticEvent } from 'react';
 import { 
   Hammer, 
   HardHat, 
@@ -29,7 +29,7 @@ import {
 
 // Imports Firebase standards
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, type User } from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
@@ -38,8 +38,15 @@ import {
   setDoc,
   onSnapshot, 
   deleteDoc, 
-  getDocs 
+  getDocs,
+  type DocumentData,
+  type DocumentSnapshot,
+  type QuerySnapshot,
+  type QueryDocumentSnapshot 
 } from 'firebase/firestore';
+
+// --- GLOBAL DECLARATION ---
+declare const __app_id: string | undefined;
 
 // --- CONFIGURATION FIREBASE ---
 const firebaseConfig = {
@@ -67,9 +74,47 @@ const getResponsesRef = () => collection(db, 'artifacts', APP_ID, 'public', 'dat
 const getScenarioDocRef = () => doc(db, 'artifacts', APP_ID, 'public', 'data', CONFIG_COLLECTION, 'scenario');
 const getControlDocRef = () => doc(db, 'artifacts', APP_ID, 'public', 'data', CONFIG_COLLECTION, 'control');
 
+// --- TYPES & INTERFACES ---
+
+interface OptionItem {
+  id: string;
+  label: string;
+  icon?: ReactNode;
+}
+
+interface Answers {
+  dangers: string[];
+  epis: string[];
+  posInit: string;
+  justifInit: string;
+  posFinal: string;
+  justifFinal: string;
+}
+
+interface ScenarioConfig {
+  title: string;
+  description: string;
+  imageUrl: string;
+}
+
+interface AppControl {
+  showResults: boolean;
+  openFinalPhase: boolean;
+}
+
+interface StatItem extends OptionItem {
+  value: number;
+}
+
+interface Stats {
+  dangers: StatItem[];
+  epis: StatItem[];
+  positions: { label: string; value: number }[];
+}
+
 // --- DATA ---
 
-const DANGERS_LIST = [
+const DANGERS_LIST: OptionItem[] = [
   { id: 'poussiere', label: 'Poussières', icon: <Wind size={20} /> },
   { id: 'bruit', label: 'Bruit', icon: <Ear size={20} /> },
   { id: 'projections', label: 'Projections', icon: <AlertTriangle size={20} /> },
@@ -79,7 +124,7 @@ const DANGERS_LIST = [
   { id: 'elec', label: 'Risque électrique', icon: <Zap size={20} /> }
 ];
 
-const EPI_LIST = [
+const EPI_LIST: OptionItem[] = [
   { id: 'casque', label: 'Casque', icon: <HardHat size={20} /> },
   { id: 'lunettes', label: 'Lunettes de protection', icon: <Glasses size={20} /> },
   { id: 'gants', label: 'Gants', icon: <HandMetal size={20} /> },
@@ -89,13 +134,13 @@ const EPI_LIST = [
   { id: 'gilet', label: 'Gilet haute visibilité', icon: <Shirt size={20} /> }
 ];
 
-const POSITIONS_INITIAL = [
+const POSITIONS_INITIAL: OptionItem[] = [
   { id: 'oui', label: 'Oui, sans hésitation' },
   { id: 'partiel', label: 'Partiellement' },
   { id: 'non', label: 'Non, j\'ai douté' }
 ];
 
-const POSITIONS_FINAL = [
+const POSITIONS_FINAL: OptionItem[] = [
   { id: 'maintien', label: 'Je maintiens mes choix' },
   { id: 'modif', label: 'Je modifie certains choix' },
   { id: 'change', label: 'J\'ai changé mon raisonnement' }
@@ -103,7 +148,13 @@ const POSITIONS_FINAL = [
 
 // --- COMPONENTS ---
 
-const Card = ({ children, title, icon: Icon }) => (
+interface CardProps {
+  children: ReactNode;
+  title: string;
+  icon?: ElementType;
+}
+
+const Card = ({ children, title, icon: Icon }: CardProps) => (
   <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-slate-200 max-w-2xl w-full mx-auto animate-fade-in-up">
     <div className="bg-yellow-400 p-4 flex items-center space-x-3 text-slate-900">
       {Icon && <Icon size={24} className="text-slate-900" />}
@@ -115,7 +166,13 @@ const Card = ({ children, title, icon: Icon }) => (
   </div>
 );
 
-const CheckboxGroup = ({ options, selected, onChange }) => (
+interface CheckboxGroupProps {
+  options: OptionItem[];
+  selected: string[];
+  onChange: (id: string) => void;
+}
+
+const CheckboxGroup = ({ options, selected, onChange }: CheckboxGroupProps) => (
   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
     {options.map((opt) => (
       <label 
@@ -144,7 +201,13 @@ const CheckboxGroup = ({ options, selected, onChange }) => (
   </div>
 );
 
-const RadioGroup = ({ options, selected, onChange }) => (
+interface RadioGroupProps {
+  options: OptionItem[];
+  selected: string;
+  onChange: (id: string) => void;
+}
+
+const RadioGroup = ({ options, selected, onChange }: RadioGroupProps) => (
   <div className="space-y-3">
     {options.map((opt) => (
       <label 
@@ -172,7 +235,13 @@ const RadioGroup = ({ options, selected, onChange }) => (
   </div>
 );
 
-const ProgressBar = ({ label, percentage, highlight = false }) => (
+interface ProgressBarProps {
+  label: string;
+  percentage: number;
+  highlight?: boolean;
+}
+
+const ProgressBar = ({ label, percentage, highlight = false }: ProgressBarProps) => (
   <div className="mb-4">
     <div className="flex justify-between text-sm mb-1">
       <span className={`font-medium ${highlight ? 'text-yellow-800 font-bold' : 'text-slate-600'}`}>
@@ -192,9 +261,9 @@ const ProgressBar = ({ label, percentage, highlight = false }) => (
 // --- MAIN APP ---
 
 export default function App() {
-  const [user, setUser] = useState(null);
-  const [step, setStep] = useState(1);
-  const [answers, setAnswers] = useState({
+  const [user, setUser] = useState<User | null>(null);
+  const [step, setStep] = useState<number>(1);
+  const [answers, setAnswers] = useState<Answers>({
     dangers: [],
     epis: [],
     posInit: '',
@@ -204,24 +273,24 @@ export default function App() {
   });
   
   // Data States
-  const [groupData, setGroupData] = useState([]);
-  const [scenarioConfig, setScenarioConfig] = useState({
+  const [groupData, setGroupData] = useState<DocumentData[]>([]);
+  const [scenarioConfig, setScenarioConfig] = useState<ScenarioConfig>({
     title: "Chantier de rénovation intérieure",
     description: "Vous percez un mur pour fixer un support métallique.\n\nNote : D'autres corps de métier sont présents à proximité (électricien, peintre).",
     imageUrl: ""
   });
   
-  // Control States (for flow management)
-  const [appControl, setAppControl] = useState({
+  // Control States
+  const [appControl, setAppControl] = useState<AppControl>({
     showResults: false,
     openFinalPhase: false
   });
 
   // Admin States
-  const [showAdminLogin, setShowAdminLogin] = useState(false);
-  const [adminPassword, setAdminPassword] = useState("");
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminConfig, setAdminConfig] = useState(scenarioConfig);
+  const [showAdminLogin, setShowAdminLogin] = useState<boolean>(false);
+  const [adminPassword, setAdminPassword] = useState<string>("");
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [adminConfig, setAdminConfig] = useState<ScenarioConfig>(scenarioConfig);
 
   // --- EFFECTS ---
 
@@ -243,26 +312,24 @@ export default function App() {
     if (!user) return;
     
     // Listen to scenario config
-    const unsubScenario = onSnapshot(getScenarioDocRef(), (docSnap) => {
+    const unsubScenario = onSnapshot(getScenarioDocRef(), (docSnap: DocumentSnapshot) => {
       if (docSnap.exists()) {
-        const data = docSnap.data();
-        setScenarioConfig({
+        const data = docSnap.data() as Partial<ScenarioConfig>;
+        const newConfig = {
             title: data.title || "Chantier de rénovation intérieure",
             description: data.description || "Vous percez un mur pour fixer un support métallique.\n\nNote : D'autres corps de métier sont présents à proximité (électricien, peintre).",
             imageUrl: data.imageUrl || ""
-        });
-        setAdminConfig({
-            title: data.title || "Chantier de rénovation intérieure",
-            description: data.description || "Vous percez un mur pour fixer un support métallique.\n\nNote : D'autres corps de métier sont présents à proximité (électricien, peintre).",
-            imageUrl: data.imageUrl || ""
-        });
+        };
+        setScenarioConfig(newConfig);
+        setAdminConfig(newConfig);
       }
     });
 
     // Listen to app control (admin locks)
-    const unsubControl = onSnapshot(getControlDocRef(), (docSnap) => {
+    const unsubControl = onSnapshot(getControlDocRef(), (docSnap: DocumentSnapshot) => {
       if (docSnap.exists()) {
-        setAppControl(docSnap.data());
+        const data = docSnap.data() as AppControl;
+        setAppControl(data);
       } else {
         // Initialize if not exists
         setDoc(getControlDocRef(), { showResults: false, openFinalPhase: false });
@@ -270,8 +337,8 @@ export default function App() {
     });
 
     // Listen to group responses
-    const unsubResponses = onSnapshot(getResponsesRef(), (snapshot) => {
-      const responses = snapshot.docs.map(doc => doc.data());
+    const unsubResponses = onSnapshot(getResponsesRef(), (snapshot: QuerySnapshot) => {
+      const responses = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());
       setGroupData(responses);
     });
 
@@ -284,7 +351,7 @@ export default function App() {
 
   // --- ACTIONS ---
 
-  const toggleSelection = (category, id) => {
+  const toggleSelection = (category: 'dangers' | 'epis', id: string) => {
     setAnswers(prev => {
       const current = prev[category];
       const updated = current.includes(id) 
@@ -294,7 +361,7 @@ export default function App() {
     });
   };
 
-  const handleTextChange = (field, value) => {
+  const handleTextChange = (field: keyof Answers, value: string) => {
     setAnswers(prev => ({ ...prev, [field]: value }));
   };
 
@@ -307,7 +374,7 @@ export default function App() {
     }
 
     // Saving logic
-    if (step === 4) {
+    if (step === 4 && user) {
       try {
         await addDoc(getResponsesRef(), {
           ...answers,
@@ -318,7 +385,7 @@ export default function App() {
       } catch (e) { console.error("Error saving step 4", e); }
     }
     
-    if (step === 7) {
+    if (step === 7 && user) {
        try {
         await addDoc(getResponsesRef(), {
           ...answers,
@@ -349,7 +416,7 @@ export default function App() {
 
   // --- ADMIN ACTIONS ---
 
-  const handleAdminLogin = (e) => {
+  const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (adminPassword === "power") {
       setIsAdmin(true);
@@ -369,7 +436,7 @@ export default function App() {
     }
   };
 
-  const toggleAppControl = async (field) => {
+  const toggleAppControl = async (field: keyof AppControl) => {
       try {
           await setDoc(getControlDocRef(), {
               ...appControl,
@@ -382,7 +449,7 @@ export default function App() {
     if (window.confirm("ATTENTION : Effacer TOUTES les réponses ? Irréversible.")) {
       try {
         const querySnapshot = await getDocs(getResponsesRef());
-        const deletePromises = querySnapshot.docs.map(d => deleteDoc(d.ref));
+        const deletePromises = querySnapshot.docs.map((d: QueryDocumentSnapshot) => deleteDoc(d.ref));
         await Promise.all(deletePromises);
         // Reset controls too
         await setDoc(getControlDocRef(), { showResults: false, openFinalPhase: false });
@@ -395,13 +462,15 @@ export default function App() {
 
   // --- STATS CALC ---
   
-  const stats = useMemo(() => {
+  const stats: Stats | null = useMemo(() => {
     if (groupData.length === 0) return null;
     const total = groupData.length;
     
-    const calculateStats = (list, categoryField) => {
+    const calculateStats = (list: OptionItem[], categoryField: string): StatItem[] => {
       return list.map(item => {
-        const count = groupData.filter(r => r[categoryField] && r[categoryField].includes(item.id)).length;
+        // Safe access because categoryField is dynamic
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const count = groupData.filter(r => r[categoryField] && (r[categoryField] as any[]).includes(item.id)).length;
         return {
           ...item,
           value: Math.round((count / total) * 100)
@@ -419,9 +488,9 @@ export default function App() {
     };
     
     const positions = [
-        { label: 'Oui, sans hésitation', value: Math.round((posCounts.oui / total) * 100) },
-        { label: 'Partiellement', value: Math.round((posCounts.partiel / total) * 100) },
-        { label: 'Non, j\'ai douté', value: Math.round((posCounts.non / total) * 100) }
+        { label: 'Oui, sans hésitation', value: total ? Math.round((posCounts.oui / total) * 100) : 0 },
+        { label: 'Partiellement', value: total ? Math.round((posCounts.partiel / total) * 100) : 0 },
+        { label: 'Non, j\'ai douté', value: total ? Math.round((posCounts.non / total) * 100) : 0 }
     ];
 
     return { dangers, epis, positions };
@@ -444,7 +513,12 @@ export default function App() {
                             src={scenarioConfig.imageUrl} 
                             alt="Situation Chantier" 
                             className="w-full h-full object-cover rounded"
-                            onError={(e) => { e.target.style.display='none'; e.target.nextSibling.style.display='flex'; }}
+                            onError={(e: SyntheticEvent<HTMLImageElement>) => {
+                                const target = e.currentTarget;
+                                target.style.display = 'none';
+                                const nextSibling = target.nextSibling as HTMLElement;
+                                if (nextSibling) nextSibling.style.display = 'flex';
+                            }}
                         />
                     ) : null}
                     <div className="text-center absolute inset-0 flex flex-col items-center justify-center bg-white" style={{ display: scenarioConfig.imageUrl ? 'none' : 'flex' }}>
