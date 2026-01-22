@@ -26,7 +26,8 @@ import {
 
 // --- FIREBASE IMPORTS ---
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
+// AJOUT DU MOT-CLÉ "type" pour User
+import { getAuth, signInAnonymously, onAuthStateChanged, type User } from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
@@ -36,10 +37,11 @@ import {
   onSnapshot, 
   deleteDoc, 
   getDocs,
-  DocumentData,
-  DocumentSnapshot,
-  QuerySnapshot,
-  QueryDocumentSnapshot
+  // AJOUT DU MOT-CLÉ "type" pour les interfaces Firestore
+  type DocumentData,
+  type DocumentSnapshot,
+  type QuerySnapshot,
+  type QueryDocumentSnapshot
 } from 'firebase/firestore';
 
 // --- FIREBASE CONFIG ---
