@@ -1,57 +1,51 @@
-import { useState, useEffect, useMemo, type ReactNode, type ElementType, type SyntheticEvent, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, type ReactNode } from 'react';
 import { 
-  Hammer, 
-  HardHat, 
-  Glasses, 
-  Ear, 
-  Footprints, 
-  Zap, 
-  Wind, 
-  Users, 
   Activity, 
+  ArrowRight,
   CheckCircle2, 
   AlertTriangle, 
-  ArrowRight,
-  RefreshCw,
-  ShieldAlert,
-  Eye,
-  HandMetal,
-  Shirt,
-  Settings,
+  Settings, 
+  Plus,
   Trash2,
   Save,
   Lock,
-  Image as ImageIcon,
   Unlock,
-  PlayCircle,
-  PauseCircle
+  Eye,
+  FileText,
+  Image as ImageIcon,
+  BarChart3,
+  HelpCircle,
+  Play,
+  Pause,
+  MoreVertical,
+  ChevronRight,
+  LayoutList,
+  UserCheck,
+  Users,
+  LogOut,
+  ArrowLeft
 } from 'lucide-react';
 
-// Imports Firebase standards
+// Imports Firebase
 import { initializeApp, type FirebaseApp, getApp, getApps } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, type User, type Auth } from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
   doc, 
-  addDoc, 
   setDoc,
   onSnapshot, 
   deleteDoc, 
+  getDoc,
   getDocs,
-  type DocumentData,
-  type DocumentSnapshot,
-  type QuerySnapshot,
-  type QueryDocumentSnapshot,
-  type Firestore
+  type Firestore,
+  type DocumentData
 } from 'firebase/firestore';
 
-// --- GLOBAL DECLARATION ---
+// --- CONFIGURATION ---
+// Configuration injectée ou fallback
 declare const __app_id: string | undefined;
-declare const __initial_auth_token: string | undefined;
-declare const __firebase_config: string | undefined; // Assuming this might be injected
 
-// --- CONFIGURATION FIREBASE ---
 // Use the provided config directly.
 const firebaseConfig = {
   apiKey: "AIzaSyD1Zd2nL59GJRC5CE4r6X-S2y6eQvj8aHg",
@@ -63,957 +57,918 @@ const firebaseConfig = {
   measurementId: "G-00RZDNZSF5"
 };
 
-// --- INITIALISATION FIREBASE (Sécurisée) ---
-// Initialize Firebase synchronously to avoid top-level await issues.
+// Initialisation Singleton
 let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
 
 try {
-    // Check if any app is already initialized
-    if (getApps().length > 0) {
-        app = getApp();
-    } else {
-        app = initializeApp(firebaseConfig);
-    }
-    auth = getAuth(app);
-    db = getFirestore(app);
+  if (getApps().length > 0) {
+    app = getApp();
+  } else {
+    app = initializeApp(firebaseConfig);
+  }
+  auth = getAuth(app);
+  db = getFirestore(app);
 } catch (e) {
-    console.error("Firebase initialization error:", e);
-    // If initialization fails, we might be in a very strange state or config is wrong.
-    // We'll throw to make it visible, but in a real app you might want a fallback UI.
-    throw e;
+  console.error("Firebase init error", e);
+  throw e;
 }
 
-// --- GESTION DE L'ID APPLICATION ---
-const RAW_APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'safety-app-default';
-const APP_ID = RAW_APP_ID.replace(/[\/.]/g, '_'); // Remplace / et . par _
+const APP_ID = (typeof __app_id !== 'undefined' ? __app_id : 'safety-app-default').replace(/[\/.]/g, '_');
 
-// CONSTANTES COLLECTIONS
-const RESPONSES_COLLECTION = 'responses';
-const CONFIG_COLLECTION_NAME = 'config';
+// --- PATHS CORRIGÉS (Structure plate) ---
+// Règle stricte: artifacts/{APP_ID}/public/data/{COLLECTION}
+const DATA_ROOT = `artifacts/${APP_ID}/public/data`;
 
-// --- HELPERS FIRESTORE ---
-const getResponsesRef = () => collection(db, 'artifacts', APP_ID, 'public', 'data', RESPONSES_COLLECTION);
-const getScenarioDocRef = () => doc(db, 'artifacts', APP_ID, 'public', 'data', CONFIG_COLLECTION_NAME, 'scenario');
-const getControlDocRef = () => doc(db, 'artifacts', APP_ID, 'public', 'data', CONFIG_COLLECTION_NAME, 'control');
+const EVALUATIONS_COLLECTION = `${DATA_ROOT}/evaluations`;
+const RESPONSES_COLLECTION = `${DATA_ROOT}/responses`; // Collection unique pour toutes les réponses
+const CONFIG_COLLECTION = `${DATA_ROOT}/config`;
+const GLOBAL_CONFIG_DOC_PATH = `${CONFIG_COLLECTION}/global`;
 
-// --- TYPES & INTERFACES ---
+// --- TYPES ---
 
-interface OptionItem {
+type StepType = 'situation' | 'question' | 'self-eval' | 'results';
+
+interface StepBase {
   id: string;
-  label: string;
-  icon?: ReactNode;
-}
-
-interface Answers {
-  dangers: string[];
-  epis: string[];
-  posInit: string;
-  justifInit: string;
-  posFinal: string;
-  justifFinal: string;
-}
-
-interface ScenarioConfig {
+  type: StepType;
   title: string;
+}
+
+interface StepSituation extends StepBase {
+  type: 'situation';
   description: string;
   imageUrl: string;
 }
 
-interface AppControl {
-  showResults: boolean;
-  openFinalPhase: boolean;
+interface StepQuestion extends StepBase {
+  type: 'question';
+  question: string;
+  options: { id: string; label: string }[];
+  multiple: boolean;
 }
 
-interface StatItem extends OptionItem {
-  value: number;
+interface StepSelfEval extends StepBase {
+  type: 'self-eval';
+  prompt: string; // "Comment vous sentez-vous ?"
+  minLabel: string;
+  maxLabel: string;
 }
 
-interface Stats {
-  dangers: StatItem[];
-  epis: StatItem[];
-  positions: { label: string; value: number }[];
+interface StepResults extends StepBase {
+  type: 'results';
+  targetStepIds: string[]; // IDs des questions à afficher
 }
 
-// --- DATA ---
+type Step = StepSituation | StepQuestion | StepSelfEval | StepResults;
 
-const DANGERS_LIST: OptionItem[] = [
-  { id: 'poussiere', label: 'Poussières', icon: <Wind size={20} /> },
-  { id: 'bruit', label: 'Bruit', icon: <Ear size={20} /> },
-  { id: 'projections', label: 'Projections', icon: <AlertTriangle size={20} /> },
-  { id: 'chute', label: 'Chute de plain-pied', icon: <Footprints size={20} /> },
-  { id: 'circulation', label: 'Circulation d\'autres personnes', icon: <Users size={20} /> },
-  { id: 'outils', label: 'Outils électroportatifs', icon: <Hammer size={20} /> },
-  { id: 'elec', label: 'Risque électrique', icon: <Zap size={20} /> }
-];
-
-const EPI_LIST: OptionItem[] = [
-  { id: 'casque', label: 'Casque', icon: <HardHat size={20} /> },
-  { id: 'lunettes', label: 'Lunettes de protection', icon: <Glasses size={20} /> },
-  { id: 'gants', label: 'Gants', icon: <HandMetal size={20} /> },
-  { id: 'chaussures', label: 'Chaussures de sécurité', icon: <Footprints size={20} /> },
-  { id: 'auditif', label: 'Protections auditives', icon: <Ear size={20} /> },
-  { id: 'masque', label: 'Masque respiratoire', icon: <Wind size={20} /> },
-  { id: 'gilet', label: 'Gilet haute visibilité', icon: <Shirt size={20} /> }
-];
-
-const POSITIONS_INITIAL: OptionItem[] = [
-  { id: 'oui', label: 'Oui, sans hésitation' },
-  { id: 'partiel', label: 'Partiellement' },
-  { id: 'non', label: 'Non, j\'ai douté' }
-];
-
-const POSITIONS_FINAL: OptionItem[] = [
-  { id: 'maintien', label: 'Je maintiens mes choix' },
-  { id: 'modif', label: 'Je modifie certains choix' },
-  { id: 'change', label: 'J\'ai changé mon raisonnement' }
-];
-
-// --- COMPONENTS ---
-
-interface CardProps {
-  children: ReactNode;
+interface Evaluation {
+  id: string;
   title: string;
-  icon?: ElementType;
+  createdAt: string;
+  steps: Step[];
 }
 
-const Card = ({ children, title, icon: Icon }: CardProps) => (
-  <div className="bg-white rounded-xl shadow-lg overflow-hidden border border-slate-200 max-w-2xl w-full mx-auto animate-fade-in-up">
-    <div className="bg-yellow-400 p-4 flex items-center space-x-3 text-slate-900">
-      {Icon && <Icon size={24} className="text-slate-900" />}
-      <h2 className="text-xl font-bold uppercase tracking-wide">{title}</h2>
-    </div>
-    <div className="p-6 md:p-8">
-      {children}
-    </div>
-  </div>
-);
-
-interface CheckboxGroupProps {
-  options: OptionItem[];
-  selected: string[];
-  onChange: (id: string) => void;
+interface GlobalState {
+  activeEvaluationId: string | null;
 }
 
-const CheckboxGroup = ({ options, selected, onChange }: CheckboxGroupProps) => (
-  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-    {options.map((opt) => (
-      <label 
-        key={opt.id} 
-        className={`flex items-center space-x-3 p-4 rounded-lg border-2 cursor-pointer transition-all duration-200 ${
-          selected.includes(opt.id) 
-            ? 'border-yellow-400 bg-yellow-50 shadow-md' 
-            : 'border-slate-200 hover:border-yellow-200 hover:bg-slate-50'
-        }`}
-      >
-        <div className={`w-6 h-6 rounded border-2 flex items-center justify-center transition-colors ${
-          selected.includes(opt.id) ? 'bg-yellow-400 border-yellow-400' : 'border-slate-300'
-        }`}>
-          {selected.includes(opt.id) && <CheckCircle2 size={16} className="text-slate-900" />}
+interface UserResponse {
+  evaluationId: string;
+  userId: string;
+  answers: Record<string, any>; // stepId -> value
+}
+
+// --- UTILS ---
+const generateId = () => Math.random().toString(36).substr(2, 9);
+
+// --- COMPOSANTS ADMIN ---
+
+const StepIcon = ({ type, size=20 }: { type: StepType, size?: number }) => {
+  switch (type) {
+    case 'situation': return <ImageIcon size={size} className="text-blue-500" />;
+    case 'question': return <HelpCircle size={size} className="text-yellow-500" />;
+    case 'self-eval': return <UserCheck size={size} className="text-purple-500" />;
+    case 'results': return <BarChart3 size={size} className="text-green-500" />;
+  }
+};
+
+const Timeline = ({ steps, activeStepId, onSelect, onMove, onDelete, onAdd }: any) => {
+  return (
+    <div className="relative">
+      {/* Ligne connectrice */}
+      <div className="absolute top-1/2 left-0 right-0 h-1 bg-slate-200 -translate-y-1/2 z-0"></div>
+      
+      <div className="flex gap-4 overflow-x-auto py-6 px-2 relative z-10 timeline-scroll items-center">
+        {steps.map((step: Step, idx: number) => (
+          <div key={step.id} className="group relative flex flex-col items-center flex-shrink-0">
+            <button
+              onClick={() => onSelect(step.id)}
+              className={`w-12 h-12 rounded-full flex items-center justify-center border-4 transition-all shadow-sm ${
+                activeStepId === step.id 
+                  ? 'bg-white border-slate-800 scale-110 shadow-lg' 
+                  : 'bg-slate-50 border-slate-300 hover:border-slate-400'
+              }`}
+            >
+              <StepIcon type={step.type} />
+            </button>
+            <div className="absolute -top-8 bg-slate-800 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
+              {idx + 1}. {step.title}
+            </div>
+            
+            {/* Controls miniature */}
+            {activeStepId === step.id && (
+              <div className="absolute -bottom-10 flex gap-1 bg-white shadow rounded-full p-1">
+                <button onClick={(e) => { e.stopPropagation(); onMove(idx, -1); }} disabled={idx === 0} className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"><ArrowLeft size={12}/></button>
+                <button onClick={(e) => { e.stopPropagation(); onDelete(idx); }} className="p-1 hover:bg-red-50 text-red-500 rounded"><Trash2 size={12}/></button>
+                <button onClick={(e) => { e.stopPropagation(); onMove(idx, 1); }} disabled={idx === steps.length - 1} className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"><ArrowRight size={12}/></button>
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* Bouton Ajouter */}
+        <div className="relative group">
+          <button className="w-10 h-10 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center transition-colors border-2 border-dashed border-slate-400 text-slate-500">
+            <Plus size={20} />
+          </button>
+          {/* Menu déroulant au survol/clic pour ajouter */}
+          <div className="absolute left-0 top-full mt-2 bg-white rounded-lg shadow-xl border border-slate-200 p-2 hidden group-hover:block w-48 z-20">
+            <p className="text-xs font-bold text-slate-400 mb-2 uppercase px-2">Ajouter une étape</p>
+            <button onClick={() => onAdd('situation')} className="w-full text-left p-2 hover:bg-blue-50 text-slate-700 rounded flex items-center gap-2 text-sm"><ImageIcon size={16} /> Situation</button>
+            <button onClick={() => onAdd('question')} className="w-full text-left p-2 hover:bg-yellow-50 text-slate-700 rounded flex items-center gap-2 text-sm"><HelpCircle size={16} /> Question</button>
+            <button onClick={() => onAdd('self-eval')} className="w-full text-left p-2 hover:bg-purple-50 text-slate-700 rounded flex items-center gap-2 text-sm"><UserCheck size={16} /> Auto-Éval</button>
+            <button onClick={() => onAdd('results')} className="w-full text-left p-2 hover:bg-green-50 text-slate-700 rounded flex items-center gap-2 text-sm"><BarChart3 size={16} /> Résultats</button>
+          </div>
         </div>
-        <div className="text-slate-700">{opt.icon}</div>
-        <span className="font-bold text-slate-800">{opt.label}</span>
-        <input 
-          type="checkbox" 
-          className="hidden" 
-          checked={selected.includes(opt.id)}
-          onChange={() => onChange(opt.id)}
-        />
-      </label>
-    ))}
-  </div>
-);
+      </div>
+    </div>
+  );
+};
 
-interface RadioGroupProps {
-  options: OptionItem[];
-  selected: string;
-  onChange: (id: string) => void;
-}
+const StepEditor = ({ step, onChange }: { step: Step, onChange: (s: Step) => void }) => {
+  if (!step) return <div className="text-slate-400 text-center py-10">Sélectionnez une étape pour l'éditer</div>;
 
-const RadioGroup = ({ options, selected, onChange }: RadioGroupProps) => (
-  <div className="space-y-3">
-    {options.map((opt) => (
-      <label 
-        key={opt.id} 
-        className={`flex items-center space-x-3 p-4 rounded-lg border-2 cursor-pointer transition-all ${
-          selected === opt.id 
-            ? 'border-yellow-400 bg-yellow-50 shadow-md' 
-            : 'border-slate-200 hover:border-yellow-200 hover:bg-slate-50'
-        }`}
-      >
-        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
-          selected === opt.id ? 'border-yellow-400' : 'border-slate-300'
-        }`}>
-          {selected === opt.id && <div className="w-3 h-3 rounded-full bg-slate-900" />}
+  const handleChange = (field: string, value: any) => {
+    onChange({ ...step, [field]: value });
+  };
+
+  return (
+    <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 animate-fade-in">
+      <div className="flex items-center gap-2 mb-6 pb-4 border-b border-slate-100">
+        <StepIcon type={step.type} size={24} />
+        <h3 className="text-lg font-bold text-slate-800 uppercase tracking-wide">Édition : {step.type}</h3>
+      </div>
+
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-slate-700 mb-1">Titre de l'étape</label>
+          <input 
+            value={step.title} 
+            onChange={(e) => handleChange('title', e.target.value)}
+            className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-slate-900 focus:border-transparent outline-none"
+          />
         </div>
-        <span className="font-bold text-slate-800">{opt.label}</span>
-        <input 
-          type="radio" 
-          className="hidden" 
-          checked={selected === opt.id}
-          onChange={() => onChange(opt.id)}
-        />
-      </label>
-    ))}
+
+        {step.type === 'situation' && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Description / Contexte</label>
+              <textarea 
+                value={(step as StepSituation).description}
+                onChange={(e) => handleChange('description', e.target.value)}
+                rows={4}
+                className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-slate-900 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">URL Image (Optionnel)</label>
+              <input 
+                value={(step as StepSituation).imageUrl}
+                onChange={(e) => handleChange('imageUrl', e.target.value)}
+                placeholder="https://..."
+                className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-slate-900 outline-none"
+              />
+            </div>
+          </>
+        )}
+
+        {step.type === 'question' && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Question posée</label>
+              <input 
+                value={(step as StepQuestion).question}
+                onChange={(e) => handleChange('question', e.target.value)}
+                className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-slate-900 outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <input 
+                type="checkbox"
+                id="multi"
+                checked={(step as StepQuestion).multiple}
+                onChange={(e) => handleChange('multiple', e.target.checked)}
+                className="w-4 h-4 text-slate-900 focus:ring-slate-900 border-gray-300 rounded"
+              />
+              <label htmlFor="multi" className="text-sm text-slate-700">Choix multiples autorisés</label>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">Options de réponse</label>
+              <div className="space-y-2">
+                {(step as StepQuestion).options.map((opt, idx) => (
+                  <div key={opt.id} className="flex gap-2">
+                    <input 
+                      value={opt.label}
+                      onChange={(e) => {
+                        const newOpts = [...(step as StepQuestion).options];
+                        newOpts[idx].label = e.target.value;
+                        handleChange('options', newOpts);
+                      }}
+                      className="flex-1 p-2 border border-slate-300 rounded text-sm"
+                      placeholder={`Option ${idx + 1}`}
+                    />
+                    <button 
+                      onClick={() => {
+                        const newOpts = (step as StepQuestion).options.filter((_, i) => i !== idx);
+                        handleChange('options', newOpts);
+                      }}
+                      className="p-2 text-red-500 hover:bg-red-50 rounded"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                ))}
+                <button 
+                  onClick={() => {
+                    const newOpts = [...(step as StepQuestion).options, { id: generateId(), label: '' }];
+                    handleChange('options', newOpts);
+                  }}
+                  className="text-sm text-blue-600 hover:underline flex items-center gap-1 mt-2"
+                >
+                  <Plus size={14} /> Ajouter une option
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {step.type === 'self-eval' && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Consigne</label>
+              <input 
+                value={(step as StepSelfEval).prompt}
+                onChange={(e) => handleChange('prompt', e.target.value)}
+                className="w-full p-2 border border-slate-300 rounded"
+                placeholder="Ex: Êtes-vous sûr de vos choix ?"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Label Min (Doute)</label>
+                <input 
+                  value={(step as StepSelfEval).minLabel}
+                  onChange={(e) => handleChange('minLabel', e.target.value)}
+                  className="w-full p-2 border border-slate-300 rounded"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Label Max (Certitude)</label>
+                <input 
+                  value={(step as StepSelfEval).maxLabel}
+                  onChange={(e) => handleChange('maxLabel', e.target.value)}
+                  className="w-full p-2 border border-slate-300 rounded"
+                />
+              </div>
+            </div>
+          </>
+        )}
+
+        {step.type === 'results' && (
+          <div className="bg-green-50 p-4 rounded text-sm text-green-800">
+            <p>Cette étape affichera automatiquement les statistiques agrégées des questions précédentes pour le groupe.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- COMPOSANT ADMIN MAIN ---
+
+const AdminDashboard = () => {
+  const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
+  const [activeEvalId, setActiveEvalId] = useState<string | null>(null);
+  const [selectedEval, setSelectedEval] = useState<Evaluation | null>(null);
+  const [activeStepId, setActiveStepId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    // Liste des évaluations
+    const unsubEvals = onSnapshot(collection(db, EVALUATIONS_COLLECTION), (snap) => {
+      const evals = snap.docs.map(d => ({ id: d.id, ...d.data() } as Evaluation));
+      setEvaluations(evals);
+    }, (error) => console.error("Error fetching evals:", error));
+
+    // Config globale
+    const unsubGlobal = onSnapshot(doc(db, GLOBAL_CONFIG_DOC_PATH), (snap) => {
+      if (snap.exists()) {
+        setActiveEvalId(snap.data().activeEvaluationId);
+      }
+    }, (error) => console.error("Error fetching global config:", error));
+
+    return () => { unsubEvals(); unsubGlobal(); };
+  }, []);
+
+  const handleCreateEval = async () => {
+    const newId = generateId();
+    const newEval: Evaluation = {
+      id: newId,
+      title: "Nouvelle Évaluation",
+      createdAt: new Date().toISOString(),
+      steps: [
+        { id: generateId(), type: 'situation', title: 'Mise en situation', description: '', imageUrl: '' } as StepSituation
+      ]
+    };
+    await setDoc(doc(db, EVALUATIONS_COLLECTION, newId), newEval);
+    setSelectedEval(newEval);
+    setActiveStepId(newEval.steps[0].id);
+  };
+
+  const handleSaveEval = async () => {
+    if (!selectedEval) return;
+    setIsSaving(true);
+    await setDoc(doc(db, EVALUATIONS_COLLECTION, selectedEval.id), selectedEval);
+    setIsSaving(false);
+  };
+
+  const handleActivate = async (id: string | null) => {
+    await setDoc(doc(db, GLOBAL_CONFIG_DOC_PATH), { activeEvaluationId: id }, { merge: true });
+  };
+
+  // Logique d'édition des steps
+  const updateStep = (newStep: Step) => {
+    if (!selectedEval) return;
+    const newSteps = selectedEval.steps.map(s => s.id === newStep.id ? newStep : s);
+    setSelectedEval({ ...selectedEval, steps: newSteps });
+  };
+
+  const addStep = (type: StepType) => {
+    if (!selectedEval) return;
+    const newStepBase = { id: generateId(), type, title: 'Nouvelle étape' };
+    let newStep: Step;
+    
+    if (type === 'situation') newStep = { ...newStepBase, description: '', imageUrl: '' } as StepSituation;
+    else if (type === 'question') newStep = { ...newStepBase, question: '', options: [{id: generateId(), label: 'Oui'}, {id: generateId(), label: 'Non'}], multiple: false } as StepQuestion;
+    else if (type === 'self-eval') newStep = { ...newStepBase, prompt: 'Justifiez votre choix', minLabel: 'Pas sûr', maxLabel: 'Sûr' } as StepSelfEval;
+    else newStep = { ...newStepBase, targetStepIds: [] } as StepResults;
+
+    const newSteps = [...selectedEval.steps, newStep];
+    setSelectedEval({ ...selectedEval, steps: newSteps });
+    setActiveStepId(newStep.id);
+  };
+
+  const deleteStep = (index: number) => {
+    if (!selectedEval) return;
+    const newSteps = selectedEval.steps.filter((_, i) => i !== index);
+    setSelectedEval({ ...selectedEval, steps: newSteps });
+    if (newSteps.length > 0) setActiveStepId(newSteps[Math.max(0, index - 1)].id);
+    else setActiveStepId(null);
+  };
+
+  const moveStep = (index: number, direction: number) => {
+    if (!selectedEval) return;
+    const newSteps = [...selectedEval.steps];
+    const temp = newSteps[index];
+    newSteps[index] = newSteps[index + direction];
+    newSteps[index + direction] = temp;
+    setSelectedEval({ ...selectedEval, steps: newSteps });
+  };
+
+  return (
+    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-800">
+      {/* SIDEBAR */}
+      <div className="w-64 bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800 flex-shrink-0">
+        <div className="p-4 border-b border-slate-800 font-bold text-white flex items-center gap-2">
+          <Settings className="text-yellow-400" /> ADMIN
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          <button 
+            onClick={handleCreateEval}
+            className="w-full bg-yellow-500 hover:bg-yellow-400 text-slate-900 font-bold py-2 rounded mb-4 flex items-center justify-center gap-2"
+          >
+            <Plus size={18} /> Créer
+          </button>
+          
+          {evaluations.map(ev => (
+            <div 
+              key={ev.id} 
+              onClick={() => { setSelectedEval(ev); setActiveStepId(ev.steps[0]?.id); }}
+              className={`p-3 rounded cursor-pointer transition-all border ${
+                selectedEval?.id === ev.id 
+                  ? 'bg-slate-800 border-yellow-500 text-white shadow-md' 
+                  : 'bg-slate-900 border-transparent hover:bg-slate-800'
+              }`}
+            >
+              <div className="font-bold truncate">{ev.title}</div>
+              <div className="text-xs text-slate-500 mt-1 flex justify-between items-center">
+                <span>{ev.steps.length} étapes</span>
+                {activeEvalId === ev.id && <span className="text-green-400 flex items-center gap-1"><Activity size={10}/> EN LIGNE</span>}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className="p-4 border-t border-slate-800 text-xs text-center text-slate-500">
+          Formatrice v2.0
+        </div>
+      </div>
+
+      {/* MAIN AREA */}
+      <div className="flex-1 flex flex-col h-full overflow-hidden">
+        {selectedEval ? (
+          <>
+            {/* HEADER */}
+            <div className="bg-white border-b border-slate-200 p-4 flex justify-between items-center shadow-sm z-20">
+              <div className="flex items-center gap-4">
+                <input 
+                  value={selectedEval.title} 
+                  onChange={(e) => setSelectedEval({...selectedEval, title: e.target.value})}
+                  className="text-xl font-bold bg-transparent border-b border-transparent hover:border-slate-300 focus:border-yellow-500 outline-none px-1"
+                />
+                {activeEvalId === selectedEval.id ? (
+                  <button onClick={() => handleActivate(null)} className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 hover:bg-green-200">
+                    <Pause size={12} /> SESSION ACTIVE
+                  </button>
+                ) : (
+                  <button onClick={() => handleActivate(selectedEval.id)} className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 hover:bg-slate-200">
+                    <Play size={12} /> ACTIVER LA SESSION
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button 
+                  onClick={handleSaveEval} 
+                  className="bg-slate-900 text-white px-4 py-2 rounded font-medium hover:bg-slate-700 flex items-center gap-2 shadow-sm"
+                >
+                  <Save size={18} /> {isSaving ? '...' : 'Sauvegarder'}
+                </button>
+              </div>
+            </div>
+
+            {/* TIMELINE */}
+            <div className="bg-slate-100 border-b border-slate-200 p-4 shadow-inner">
+              <Timeline 
+                steps={selectedEval.steps} 
+                activeStepId={activeStepId} 
+                onSelect={setActiveStepId}
+                onMove={moveStep}
+                onDelete={deleteStep}
+                onAdd={addStep}
+              />
+            </div>
+
+            {/* EDITOR */}
+            <div className="flex-1 overflow-y-auto p-8">
+              <div className="max-w-3xl mx-auto">
+                {activeStepId ? (
+                  <StepEditor 
+                    step={selectedEval.steps.find(s => s.id === activeStepId)!} 
+                    onChange={updateStep} 
+                  />
+                ) : (
+                  <div className="flex items-center justify-center h-64 text-slate-400">
+                    Sélectionnez une étape dans la timeline pour commencer
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
+            <LayoutList size={64} className="mb-4 opacity-20" />
+            <p>Sélectionnez ou créez une évaluation</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- COMPOSANT USER PLAYER ---
+
+const UserPlayer = ({ evalData, user }: { evalData: Evaluation, user: User }) => {
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [groupStats, setGroupStats] = useState<any>(null); // Pour l'étape résultats
+
+  const step = evalData.steps[currentStepIndex];
+  const isLastStep = currentStepIndex === evalData.steps.length - 1;
+
+  // Sync answers to Firebase on change (Correction: Use flattened collection + composite ID)
+  useEffect(() => {
+    if (!user || Object.keys(answers).length === 0) return;
+    
+    // Composite ID: One record per user per evaluation
+    const docId = `${evalData.id}_${user.uid}`;
+    const docRef = doc(db, RESPONSES_COLLECTION, docId);
+    
+    setDoc(docRef, { 
+      evaluationId: evalData.id, // Mandatory for filtering
+      userId: user.uid, 
+      answers, 
+      updatedAt: new Date().toISOString() 
+    }, { merge: true }).catch(err => console.error("Error saving answers:", err));
+  }, [answers, user, evalData.id]);
+
+  // Fetch stats ONLY if current step is Results (Correction: Fetch all and filter in JS)
+  useEffect(() => {
+    if (step.type === 'results') {
+      const q = collection(db, RESPONSES_COLLECTION);
+      const unsub = onSnapshot(q, (snap) => {
+        // FILTER CLIENT SIDE (Rule 2 of Instructions)
+        const filteredResponses = snap.docs
+          .map(d => d.data())
+          .filter((d: any) => d.evaluationId === evalData.id);
+          
+        const allAnswers = filteredResponses.map((r: any) => r.answers);
+        setGroupStats(allAnswers);
+      }, (error) => {
+        console.error("Error fetching group stats:", error);
+      });
+      return () => unsub();
+    }
+  }, [step.type, evalData.id]);
+
+  const handleAnswer = (val: any) => {
+    setAnswers(prev => ({ ...prev, [step.id]: val }));
+  };
+
+  const next = () => {
+    if (!isLastStep) {
+      window.scrollTo(0,0);
+      setCurrentStepIndex(prev => prev + 1);
+    }
+  };
+
+  const renderStepContent = () => {
+    switch (step.type) {
+      case 'situation':
+        return (
+          <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden animate-fade-in">
+            <div className="bg-blue-600 p-4 text-white flex items-center gap-3">
+              <ImageIcon />
+              <h2 className="text-xl font-bold uppercase">{step.title}</h2>
+            </div>
+            <div className="p-6 md:p-8 flex flex-col md:flex-row gap-8">
+              {(step as StepSituation).imageUrl && (
+                <img 
+                  src={(step as StepSituation).imageUrl} 
+                  className="w-full md:w-1/2 h-64 object-cover rounded-lg shadow-md bg-slate-100" 
+                  alt="Situation"
+                />
+              )}
+              <div className="flex-1 text-lg text-slate-700 leading-relaxed whitespace-pre-wrap">
+                {(step as StepSituation).description}
+              </div>
+            </div>
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button onClick={next} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-bold shadow transition-transform active:scale-95 flex items-center gap-2">
+                Commencer <ArrowRight />
+              </button>
+            </div>
+          </div>
+        );
+
+      case 'question':
+        const qStep = step as StepQuestion;
+        const currentAns = answers[step.id] || (qStep.multiple ? [] : null);
+        
+        const toggleOption = (optId: string) => {
+          if (qStep.multiple) {
+            const arr = currentAns as string[];
+            if (arr.includes(optId)) handleAnswer(arr.filter(id => id !== optId));
+            else handleAnswer([...arr, optId]);
+          } else {
+            handleAnswer(optId);
+          }
+        };
+
+        return (
+          <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden animate-fade-in max-w-2xl mx-auto">
+            <div className="bg-yellow-400 p-4 text-slate-900 flex items-center gap-3">
+              <HelpCircle />
+              <h2 className="text-xl font-bold uppercase">{step.title}</h2>
+            </div>
+            <div className="p-8">
+              <h3 className="text-xl font-medium text-slate-800 mb-6">{qStep.question}</h3>
+              <div className="space-y-3">
+                {qStep.options.map(opt => {
+                  const isSelected = qStep.multiple 
+                    ? (currentAns as string[]).includes(opt.id)
+                    : currentAns === opt.id;
+                  
+                  return (
+                    <div 
+                      key={opt.id}
+                      onClick={() => toggleOption(opt.id)}
+                      className={`p-4 rounded-lg border-2 cursor-pointer transition-all flex items-center justify-between ${
+                        isSelected 
+                          ? 'border-yellow-400 bg-yellow-50 shadow-md' 
+                          : 'border-slate-200 hover:border-yellow-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="font-bold text-slate-700">{opt.label}</span>
+                      {isSelected && <CheckCircle2 className="text-yellow-500" />}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button 
+                onClick={next} 
+                disabled={!currentAns || (Array.isArray(currentAns) && currentAns.length === 0)}
+                className="bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed text-white px-8 py-3 rounded-lg font-bold shadow transition-transform active:scale-95 flex items-center gap-2"
+              >
+                Valider <ArrowRight />
+              </button>
+            </div>
+          </div>
+        );
+
+      case 'self-eval':
+        const seStep = step as StepSelfEval;
+        const currentEval = answers[step.id] || { position: 50, justification: '' };
+
+        return (
+          <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden animate-fade-in max-w-2xl mx-auto">
+            <div className="bg-purple-600 p-4 text-white flex items-center gap-3">
+              <UserCheck />
+              <h2 className="text-xl font-bold uppercase">{step.title}</h2>
+            </div>
+            <div className="p-8">
+              <p className="text-lg text-slate-700 mb-8">{seStep.prompt}</p>
+              
+              <div className="mb-8 bg-slate-50 p-6 rounded-xl border border-slate-100">
+                <div className="flex justify-between text-sm font-bold text-slate-500 mb-4 uppercase tracking-wider">
+                  <span>{seStep.minLabel}</span>
+                  <span>{seStep.maxLabel}</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" max="100" 
+                  value={currentEval.position}
+                  onChange={(e) => handleAnswer({ ...currentEval, position: parseInt(e.target.value) })}
+                  className="w-full h-3 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-2">Pourquoi ce choix ?</label>
+                <textarea 
+                  value={currentEval.justification}
+                  onChange={(e) => handleAnswer({ ...currentEval, justification: e.target.value })}
+                  className="w-full p-4 border-2 border-slate-200 rounded-xl focus:border-purple-500 focus:ring-4 focus:ring-purple-100 outline-none transition-all"
+                  rows={3}
+                  placeholder="Expliquez brièvement..."
+                />
+              </div>
+            </div>
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button 
+                onClick={next} 
+                disabled={!currentEval.justification}
+                className="bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white px-8 py-3 rounded-lg font-bold shadow transition-transform active:scale-95 flex items-center gap-2"
+              >
+                Continuer <ArrowRight />
+              </button>
+            </div>
+          </div>
+        );
+
+      case 'results':
+        return (
+          <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden animate-fade-in">
+            <div className="bg-green-600 p-4 text-white flex items-center gap-3">
+              <BarChart3 />
+              <h2 className="text-xl font-bold uppercase">Résultats du Groupe</h2>
+            </div>
+            <div className="p-8">
+              {groupStats ? (
+                <div className="space-y-8">
+                  {/* On cherche les questions précédentes pour afficher leurs stats */}
+                  {evalData.steps.filter(s => s.type === 'question').map(q => {
+                    const qst = q as StepQuestion;
+                    // Count stats
+                    const counts: Record<string, number> = {};
+                    qst.options.forEach(o => counts[o.id] = 0);
+                    
+                    groupStats.forEach((ans: any) => {
+                      const val = ans[q.id];
+                      if (Array.isArray(val)) val.forEach(v => counts[v] = (counts[v] || 0) + 1);
+                      else if (val) counts[val] = (counts[val] || 0) + 1;
+                    });
+
+                    const total = groupStats.length || 1;
+
+                    return (
+                      <div key={q.id} className="border-b border-slate-100 pb-6 last:border-0">
+                        <h4 className="font-bold text-slate-800 mb-4">{qst.question}</h4>
+                        <div className="space-y-3">
+                          {qst.options.map(opt => {
+                            const pct = Math.round((counts[opt.id] / total) * 100);
+                            return (
+                              <div key={opt.id}>
+                                <div className="flex justify-between text-sm mb-1">
+                                  <span className="font-medium text-slate-600">{opt.label}</span>
+                                  <span className="font-bold text-slate-900">{pct}%</span>
+                                </div>
+                                <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
+                                  <div className="h-full bg-green-500 transition-all duration-1000" style={{ width: `${pct}%` }}></div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="text-center text-slate-500 py-12">Chargement des données...</div>
+              )}
+            </div>
+            <div className="p-6 bg-slate-50 border-t border-slate-100 flex justify-end">
+              <button onClick={next} className="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3 rounded-lg font-bold shadow flex items-center gap-2">
+                Suite <ArrowRight />
+              </button>
+            </div>
+          </div>
+        );
+        
+      default: return null;
+    }
+  };
+
+  if (currentStepIndex >= evalData.steps.length) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] animate-fade-in p-4 text-center">
+        <div className="bg-green-100 p-6 rounded-full mb-6 text-green-600">
+          <CheckCircle2 size={64} />
+        </div>
+        <h2 className="text-3xl font-bold text-slate-900 mb-4">Évaluation Terminée</h2>
+        <p className="text-slate-600 mb-8 max-w-md">Merci pour votre participation active. Vous pouvez maintenant attendre les consignes du formateur.</p>
+        <button onClick={() => window.location.reload()} className="text-slate-400 hover:text-slate-600 text-sm underline">
+          Retour à l'accueil
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto px-4 py-8 w-full">
+      {/* Progress Bar Header */}
+      <div className="mb-8 flex items-center gap-4">
+        <div className="flex-1 h-3 bg-slate-200 rounded-full overflow-hidden">
+          <div 
+            className="h-full bg-slate-900 transition-all duration-500 ease-out" 
+            style={{ width: `${((currentStepIndex + 1) / evalData.steps.length) * 100}%` }}
+          />
+        </div>
+        <span className="text-xs font-bold text-slate-500 whitespace-nowrap">
+          Étape {currentStepIndex + 1} / {evalData.steps.length}
+        </span>
+      </div>
+      
+      {renderStepContent()}
+    </div>
+  );
+};
+
+const WaitingScreen = () => (
+  <div className="flex flex-col items-center justify-center min-h-[80vh] text-center p-4 animate-fade-in">
+    <div className="bg-yellow-50 p-8 rounded-full mb-8 animate-pulse">
+      <Users size={64} className="text-yellow-500" />
+    </div>
+    <h1 className="text-3xl md:text-4xl font-black text-slate-900 mb-4 tracking-tight">SALLE D'ATTENTE</h1>
+    <p className="text-lg text-slate-600 max-w-lg mx-auto">
+      Le formateur n'a pas encore lancé de session active. Veuillez patienter, l'affichage se mettra à jour automatiquement.
+    </p>
   </div>
 );
 
-interface ProgressBarProps {
-  label: string;
-  percentage: number;
-  highlight?: boolean;
-}
-
-const ProgressBar = ({ label, percentage, highlight = false }: ProgressBarProps) => (
-  <div className="mb-4">
-    <div className="flex justify-between text-sm mb-1">
-      <span className={`font-medium ${highlight ? 'text-yellow-800 font-bold' : 'text-slate-600'}`}>
-        {label} {highlight && '(Votre choix)'}
-      </span>
-      <span className="text-slate-700 font-bold">{percentage}%</span>
-    </div>
-    <div className="w-full bg-slate-200 rounded-full h-4 overflow-hidden border border-slate-300">
-      <div 
-        className={`h-full rounded-full transition-all duration-1000 ease-out flex items-center justify-end pr-1 ${highlight ? 'bg-yellow-400' : 'bg-slate-500'}`}
-        style={{ width: `${percentage}%` }}
-      />
-    </div>
-  </div>
-);
-
-// --- MAIN APP ---
+// --- APP ROOT ---
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [step, setStep] = useState<number>(1);
-  const [answers, setAnswers] = useState<Answers>({
-    dangers: [],
-    epis: [],
-    posInit: '',
-    justifInit: '',
-    posFinal: '',
-    justifFinal: ''
-  });
-  
-  // Data States
-  const [groupData, setGroupData] = useState<DocumentData[]>([]);
-  const [scenarioConfig, setScenarioConfig] = useState<ScenarioConfig>({
-    title: "Chantier de rénovation intérieure",
-    description: "Vous percez un mur pour fixer un support métallique.\n\nNote : D'autres corps de métier sont présents à proximité (électricien, peintre).",
-    imageUrl: ""
-  });
-  
-  // Control States
-  const [appControl, setAppControl] = useState<AppControl>({
-    showResults: false,
-    openFinalPhase: false
-  });
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [activeEvalId, setActiveEvalId] = useState<string | null>(null);
+  const [activeEvalData, setActiveEvalData] = useState<Evaluation | null>(null);
+  const [showLogin, setShowLogin] = useState(false);
+  const [password, setPassword] = useState("");
 
-  // Admin States
-  const [showAdminLogin, setShowAdminLogin] = useState<boolean>(false);
-  const [adminPassword, setAdminPassword] = useState<string>("");
-  const [isAdmin, setIsAdmin] = useState<boolean>(false);
-  const [adminConfig, setAdminConfig] = useState<ScenarioConfig>(scenarioConfig);
-
-  // --- EFFECTS ---
-
+  // Auth Init
   useEffect(() => {
-    const initAuth = async () => {
-      try {
-        await signInAnonymously(auth);
-      } catch (error) {
-        console.error("Auth Error:", error);
-      }
-    };
-    initAuth();
-    
-    const unsubscribe = onAuthStateChanged(auth, (u) => setUser(u));
-    return () => unsubscribe();
+    signInAnonymously(auth).catch(console.error);
+    return onAuthStateChanged(auth, setUser);
   }, []);
 
+  // Listen to Global Config
   useEffect(() => {
     if (!user) return;
-    
-    // Listen to scenario config
-    const unsubScenario = onSnapshot(getScenarioDocRef(), (docSnap: DocumentSnapshot) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as Partial<ScenarioConfig>;
-        const newConfig = {
-            title: typeof data.title === 'string' ? data.title : "Chantier de rénovation intérieure",
-            description: typeof data.description === 'string' ? data.description : "Vous percez un mur pour fixer un support métallique.\n\nNote : D'autres corps de métier sont présents à proximité (électricien, peintre).",
-            imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : ""
-        };
-        setScenarioConfig(newConfig);
-        setAdminConfig(newConfig);
-      }
-    });
-
-    // Listen to app control (admin locks)
-    const unsubControl = onSnapshot(getControlDocRef(), (docSnap: DocumentSnapshot) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data() as AppControl;
-        setAppControl(data);
-      } else {
-        // Initialize if not exists
-        // Need to make sure we use setDoc correctly with a document reference
-        setDoc(getControlDocRef(), { showResults: false, openFinalPhase: false }, { merge: true });
-      }
-    });
-
-    // Listen to group responses
-    const unsubResponses = onSnapshot(getResponsesRef(), (snapshot: QuerySnapshot) => {
-      const responses = snapshot.docs.map((doc: QueryDocumentSnapshot) => doc.data());
-      setGroupData(responses);
-    });
-
-    return () => {
-      unsubScenario();
-      unsubControl();
-      unsubResponses();
-    };
+    const unsub = onSnapshot(doc(db, GLOBAL_CONFIG_DOC_PATH), (doc) => {
+      if (doc.exists()) setActiveEvalId(doc.data().activeEvaluationId);
+      else setActiveEvalId(null);
+    }, (error) => console.error("Error watching config:", error));
+    return () => unsub();
   }, [user]);
 
-  // --- ACTIONS ---
-
-  const toggleSelection = (category: 'dangers' | 'epis', id: string) => {
-    setAnswers(prev => {
-      const current = prev[category];
-      const updated = current.includes(id) 
-        ? current.filter(item => item !== id)
-        : [...current, id];
-      return { ...prev, [category]: updated };
-    });
-  };
-
-  const handleTextChange = (field: keyof Answers, value: string) => {
-    setAnswers(prev => ({ ...prev, [field]: value }));
-  };
-
-  const nextStep = async () => {
-    // Confirmation Dialog
-    if (step === 2 || step === 3 || step === 4 || step === 7) {
-        if (!window.confirm("Êtes-vous sûr de vouloir valider ces choix ?")) {
-            return;
-        }
-    }
-
-    // Saving logic
-    if (step === 4 && user) {
-      try {
-        await addDoc(getResponsesRef(), {
-          ...answers,
-          timestamp: new Date().toISOString(),
-          userId: user.uid,
-          completed: false
-        });
-      } catch (e) { console.error("Error saving step 4", e); }
-    }
-    
-    if (step === 7 && user) {
-       try {
-        await addDoc(getResponsesRef(), {
-          ...answers,
-          timestamp: new Date().toISOString(),
-          userId: user.uid,
-          completed: true
-        });
-       } catch (e) { console.error("Error saving step 7", e); }
-    }
-
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-    setStep(prev => prev + 1);
-  };
-  
-  const resetApp = () => {
-    if (window.confirm("Voulez-vous vraiment recommencer du début ?")) {
-        setStep(1);
-        setAnswers({
-        dangers: [],
-        epis: [],
-        posInit: '',
-        justifInit: '',
-        posFinal: '',
-        justifFinal: ''
-        });
-    }
-  };
-
-  // --- ADMIN ACTIONS ---
-
-  const handleAdminLogin = (e: FormEvent) => {
-    e.preventDefault();
-    if (adminPassword === "power") {
-      setIsAdmin(true);
-      setShowAdminLogin(false);
-      setAdminPassword("");
+  // Fetch Active Eval Data
+  useEffect(() => {
+    if (activeEvalId) {
+      getDoc(doc(db, EVALUATIONS_COLLECTION, activeEvalId)).then(snap => {
+        if (snap.exists()) setActiveEvalData({ id: snap.id, ...snap.data() } as Evaluation);
+      }).catch(err => console.error("Error fetching active eval:", err));
     } else {
-      alert("Mot de passe incorrect");
+      setActiveEvalData(null);
+    }
+  }, [activeEvalId]);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (password === "power") {
+      setIsAdmin(true);
+      setShowLogin(false);
+    } else {
+      alert("Erreur mot de passe");
     }
   };
 
-  const saveConfiguration = async () => {
-    try {
-      await setDoc(getScenarioDocRef(), adminConfig);
-      alert("Configuration sauvegardée !");
-    } catch (e) {
-      alert("Erreur sauvegarde.");
-    }
-  };
+  if (!user) return <div className="h-screen flex items-center justify-center bg-slate-50 text-slate-400">Chargement...</div>;
 
-  const toggleAppControl = async (field: keyof AppControl) => {
-      try {
-          await setDoc(getControlDocRef(), {
-              ...appControl,
-              [field]: !appControl[field]
-          });
-      } catch (e) { console.error("Error updating control", e); }
-  };
-
-  const clearDatabase = async () => {
-    if (window.confirm("ATTENTION : Effacer TOUTES les réponses ? Irréversible.")) {
-      try {
-        const querySnapshot = await getDocs(getResponsesRef());
-        const deletePromises = querySnapshot.docs.map((d: QueryDocumentSnapshot) => deleteDoc(d.ref));
-        await Promise.all(deletePromises);
-        // Reset controls too
-        await setDoc(getControlDocRef(), { showResults: false, openFinalPhase: false });
-        alert("Base de données effacée et états réinitialisés.");
-      } catch (e) {
-        alert("Erreur suppression.");
-      }
-    }
-  };
-
-  // --- STATS CALC ---
-  
-  const stats: Stats | null = useMemo(() => {
-    if (groupData.length === 0) return null;
-    const total = groupData.length;
-    
-    const calculateStats = (list: OptionItem[], categoryField: string): StatItem[] => {
-      return list.map(item => {
-        // Safe access because categoryField is dynamic
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const count = groupData.filter(r => r[categoryField] && (r[categoryField] as any[]).includes(item.id)).length;
-        return {
-          ...item,
-          value: Math.round((count / total) * 100)
-        };
-      }).sort((a,b) => b.value - a.value);
-    };
-
-    const dangers = calculateStats(DANGERS_LIST, 'dangers');
-    const epis = calculateStats(EPI_LIST, 'epis');
-    
-    const posCounts = {
-        'oui': groupData.filter(r => r.posInit === 'oui').length,
-        'partiel': groupData.filter(r => r.posInit === 'partiel').length,
-        'non': groupData.filter(r => r.posInit === 'non').length
-    };
-    
-    const positions = [
-        { label: 'Oui, sans hésitation', value: total ? Math.round((posCounts.oui / total) * 100) : 0 },
-        { label: 'Partiellement', value: total ? Math.round((posCounts.partiel / total) * 100) : 0 },
-        { label: 'Non, j\'ai douté', value: total ? Math.round((posCounts.non / total) * 100) : 0 }
-    ];
-
-    return { dangers, epis, positions };
-  }, [groupData]);
-
-
-  // --- RENDERERS ---
-
-  const renderStep = () => {
-    switch(step) {
-      case 1:
-        return (
-          <Card title="Situation Professionnelle" icon={Activity}>
-            <div className="space-y-6">
-              <div className="bg-slate-100 p-6 rounded-lg border border-slate-200">
-                <div className="flex flex-col md:flex-row gap-6 items-center">
-                  <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200 flex items-center justify-center w-full md:w-1/3 h-48 text-slate-300 overflow-hidden relative">
-                    {scenarioConfig.imageUrl ? (
-                        <img 
-                            src={scenarioConfig.imageUrl} 
-                            alt="Situation Chantier" 
-                            className="w-full h-full object-cover rounded"
-                            onError={(e: SyntheticEvent<HTMLImageElement>) => {
-                                const target = e.currentTarget;
-                                target.style.display = 'none';
-                                const nextSibling = target.nextSibling as HTMLElement;
-                                if (nextSibling) nextSibling.style.display = 'flex';
-                            }}
-                        />
-                    ) : null}
-                    <div className="text-center absolute inset-0 flex flex-col items-center justify-center bg-white" style={{ display: scenarioConfig.imageUrl ? 'none' : 'flex' }}>
-                       <Hammer size={48} className="mx-auto mb-2 text-yellow-500" />
-                       <span className="text-sm font-medium text-slate-500 block">Illustration Chantier</span>
-                    </div>
-                  </div>
-                  <div className="flex-1 space-y-4 text-slate-700 whitespace-pre-line">
-                    <h3 className="font-bold text-lg border-l-4 border-yellow-400 pl-4 text-slate-900">
-                      {scenarioConfig.title}
-                    </h3>
-                    <div className="text-slate-800">
-                        {scenarioConfig.description}
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <button 
-                onClick={nextStep}
-                style={{ backgroundColor: '#FACC15', color: '#0F172A' }} // FORCE STYLE YELLOW
-                className="w-full bg-yellow-400 text-slate-900 py-4 rounded-lg font-bold text-lg shadow-md hover:bg-yellow-500 transition-colors flex items-center justify-center gap-2"
-              >
-                Commencer l'analyse <ArrowRight size={24} />
-              </button>
-            </div>
-          </Card>
-        );
-
-      case 2:
-        return (
-          <Card title="Identification des Dangers" icon={ShieldAlert}>
-             <p className="mb-6 text-slate-800 font-medium text-lg">Quels dangers identifies-tu dans cette situation précise ?</p>
-             <CheckboxGroup 
-                options={DANGERS_LIST} 
-                selected={answers.dangers} 
-                onChange={(id) => toggleSelection('dangers', id)} 
-             />
-             <div className="mt-8 flex justify-end">
-               <button 
-                 onClick={nextStep}
-                 disabled={answers.dangers.length === 0}
-                 className={`px-8 py-3 rounded-lg font-bold text-lg shadow-md transition-all ${
-                   answers.dangers.length > 0 
-                    ? 'bg-yellow-400 text-slate-900 hover:bg-yellow-500 hover:scale-105' 
-                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                 }`}
-               >
-                 Valider mes choix
-               </button>
-             </div>
-          </Card>
-        );
-
-      case 3:
-        return (
-          <Card title="Choix des EPI" icon={HardHat}>
-             <p className="mb-6 text-slate-800 font-medium text-lg">Quels EPI te semblent <span className="font-bold border-b-2 border-yellow-400">nécessaires</span> pour cette intervention ?</p>
-             <CheckboxGroup 
-                options={EPI_LIST} 
-                selected={answers.epis} 
-                onChange={(id) => toggleSelection('epis', id)} 
-             />
-             <div className="mt-8 flex justify-end">
-               <button 
-                 onClick={nextStep}
-                 disabled={answers.epis.length === 0}
-                 className={`px-8 py-3 rounded-lg font-bold text-lg shadow-md transition-all ${
-                    answers.epis.length > 0 
-                     ? 'bg-yellow-400 text-slate-900 hover:bg-yellow-500 hover:scale-105' 
-                     : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  }`}
-               >
-                 Continuer
-               </button>
-             </div>
-          </Card>
-        );
-
-      case 4:
-        return (
-          <Card title="Auto-positionnement Initial" icon={Activity}>
-             <p className="mb-4 text-slate-800 font-medium text-lg">Sur cette situation, je me sens capable de justifier mes choix d’EPI :</p>
-             
-             <RadioGroup 
-               options={POSITIONS_INITIAL}
-               selected={answers.posInit}
-               onChange={(val) => handleTextChange('posInit', val)}
-             />
-
-             <div className="mt-6">
-               <label className="block text-sm font-bold text-slate-700 mb-2">Explique brièvement ton positionnement :</label>
-               <textarea 
-                 className="w-full p-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 outline-none min-h-[100px] text-slate-800"
-                 placeholder="Je pense avoir choisi..."
-                 value={answers.justifInit}
-                 onChange={(e) => handleTextChange('justifInit', e.target.value)}
-               />
-             </div>
-
-             <div className="mt-8 flex justify-end">
-               <button 
-                 onClick={nextStep}
-                 disabled={!answers.posInit || !answers.justifInit}
-                 className={`px-8 py-3 rounded-lg font-bold text-lg shadow-md transition-all ${
-                   answers.posInit && answers.justifInit
-                    ? 'bg-yellow-400 text-slate-900 hover:bg-yellow-500 hover:scale-105' 
-                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                 }`}
-               >
-                 Envoyer et voir les résultats
-               </button>
-             </div>
-          </Card>
-        );
-
-      case 5:
-        // ECRAN D'ATTENTE OU DE RESULTATS
-        if (!appControl.showResults && !isAdmin) {
-            return (
-                <Card title="Réflexion Collective" icon={Users}>
-                    <div className="flex flex-col items-center justify-center py-12 text-center animate-fade-in-up">
-                        <div className="bg-yellow-100 p-6 rounded-full mb-6 animate-pulse">
-                            <Users size={64} className="text-yellow-600" />
-                        </div>
-                        <h3 className="text-2xl font-bold text-slate-900 mb-2">En attente du groupe</h3>
-                        <p className="text-slate-600 max-w-md">
-                            Veuillez patienter pendant que l'animateur débloque l'affichage des résultats collectifs.
-                        </p>
-                    </div>
-                </Card>
-            );
-        }
-
-        return (
-          <Card title="Réflexion Collective" icon={Users}>
-             <div className="mb-6 p-4 bg-blue-50 text-blue-900 rounded-lg flex items-start gap-3 border border-blue-200">
-                <Eye className="mt-1 flex-shrink-0" size={20} />
-                <p className="text-sm font-medium">Voici les tendances réelles du groupe. Observez les différences avec vos choix (surlignés).</p>
-             </div>
-
-             {stats ? (
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                   <div>
-                     <h3 className="font-bold text-slate-900 mb-4 border-b-2 border-yellow-400 pb-2 inline-block">Dangers identifiés</h3>
-                     {stats.dangers.slice(0, 5).map(d => (
-                       <ProgressBar 
-                          key={d.id} 
-                          label={d.label} 
-                          percentage={d.value} 
-                          highlight={answers.dangers.includes(d.id)}
-                       />
-                     ))}
-                   </div>
-                   <div>
-                     <h3 className="font-bold text-slate-900 mb-4 border-b-2 border-yellow-400 pb-2 inline-block">EPI choisis</h3>
-                     {stats.epis.slice(0, 5).map(e => (
-                       <ProgressBar 
-                          key={e.id} 
-                          label={e.label} 
-                          percentage={e.value} 
-                          highlight={answers.epis.includes(e.id)}
-                       />
-                     ))}
-                   </div>
-                 </div>
-             ) : (
-                 <div className="text-center p-8 text-slate-500 italic">Chargement des données...</div>
-             )}
-
-             <div className="mt-8 pt-6 border-t border-slate-200">
-                <h3 className="font-bold text-slate-900 mb-4">Confiance du groupe</h3>
-                {stats && (
-                    <>
-                    <div className="flex h-6 rounded-full overflow-hidden border border-slate-300">
-                    <div style={{width: `${stats.positions[0].value}%`}} className="bg-green-500 h-full flex items-center justify-center text-xs text-white font-bold">{stats.positions[0].value > 10 && 'Sûr'}</div>
-                    <div style={{width: `${stats.positions[1].value}%`}} className="bg-yellow-400 h-full flex items-center justify-center text-xs text-slate-900 font-bold">{stats.positions[1].value > 10 && 'Partiel'}</div>
-                    <div style={{width: `${stats.positions[2].value}%`}} className="bg-red-500 h-full flex items-center justify-center text-xs text-white font-bold">{stats.positions[2].value > 10 && 'Doute'}</div>
-                    </div>
-                    </>
-                )}
-             </div>
-
-             <div className="mt-8 flex justify-end items-center gap-4">
-               {!appControl.openFinalPhase && !isAdmin && (
-                   <span className="text-sm text-slate-500 italic flex items-center gap-2">
-                       <Lock size={16}/> Suite bloquée par l'animateur
-                   </span>
-               )}
-               <button 
-                 onClick={nextStep}
-                 disabled={!appControl.openFinalPhase && !isAdmin}
-                 className={`px-8 py-3 rounded-lg font-bold text-lg shadow-md transition-all ${
-                     appControl.openFinalPhase || isAdmin
-                     ? 'bg-yellow-400 text-slate-900 hover:bg-yellow-500 hover:scale-105'
-                     : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                 }`}
-               >
-                 Poursuivre la réflexion
-               </button>
-             </div>
-          </Card>
-        );
-
-      case 6:
-        return (
-          <Card title="Critères de Pertinence" icon={CheckCircle2}>
-             <div className="space-y-6 text-slate-800">
-               <p className="text-lg font-medium">Pour vous aider à vous repositionner, considérez ces critères :</p>
-               
-               <div className="bg-white border-l-4 border-green-500 shadow-sm p-6 rounded-r-lg space-y-4">
-                 <h3 className="font-bold text-lg text-slate-900">Un choix d'EPI est pertinent si :</h3>
-                 <ul className="space-y-3">
-                   <li className="flex items-start gap-3">
-                     <CheckCircle2 size={24} className="text-green-500 mt-1 shrink-0" />
-                     <span>Chaque EPI répond à un danger <span className="font-bold bg-green-100 px-1">réellement identifié</span>.</span>
-                   </li>
-                   <li className="flex items-start gap-3">
-                     <CheckCircle2 size={24} className="text-green-500 mt-1 shrink-0" />
-                     <span>Aucun EPI n'est choisi simplement "par habitude" ou automatisme.</span>
-                   </li>
-                   <li className="flex items-start gap-3">
-                     <CheckCircle2 size={24} className="text-green-500 mt-1 shrink-0" />
-                     <span>La situation <span className="font-bold bg-green-100 px-1">globale</span> (coactivité avec peintres/électriciens) est prise en compte.</span>
-                   </li>
-                   <li className="flex items-start gap-3">
-                     <CheckCircle2 size={24} className="text-green-500 mt-1 shrink-0" />
-                     <span>Vous pourriez expliquer le "Pourquoi" à un collègue sceptique.</span>
-                   </li>
-                 </ul>
-               </div>
-             </div>
-
-             <div className="mt-8 flex justify-end">
-               <button 
-                 onClick={nextStep}
-                 className="px-8 py-3 bg-yellow-400 text-slate-900 rounded-lg font-bold text-lg shadow-md hover:bg-yellow-500 hover:scale-105 transition-all"
-               >
-                 Me repositionner
-               </button>
-             </div>
-          </Card>
-        );
-
-      case 7:
-        return (
-          <Card title="Auto-positionnement Final" icon={RefreshCw}>
-             <p className="mb-4 text-slate-800 font-medium text-lg">Après avoir vu les tendances du groupe et lu les critères, comment te situes-tu maintenant ?</p>
-             
-             <RadioGroup 
-               options={POSITIONS_FINAL}
-               selected={answers.posFinal}
-               onChange={(val) => handleTextChange('posFinal', val)}
-             />
-
-             <div className="mt-6">
-               <label className="block text-sm font-bold text-slate-700 mb-2">Explique ce qui a évolué (ou non) dans ton raisonnement :</label>
-               <textarea 
-                 className="w-full p-3 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 outline-none min-h-[100px] text-slate-800"
-                 placeholder="J'ai réalisé que..."
-                 value={answers.justifFinal}
-                 onChange={(e) => handleTextChange('justifFinal', e.target.value)}
-               />
-             </div>
-
-             <div className="mt-8 flex justify-end">
-               <button 
-                 onClick={nextStep}
-                 disabled={!answers.posFinal || !answers.justifFinal}
-                 className={`px-8 py-3 rounded-lg font-bold text-lg shadow-md transition-all ${
-                    answers.posFinal && answers.justifFinal
-                    ? 'bg-yellow-400 text-slate-900 hover:bg-yellow-500 hover:scale-105' 
-                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                 }`}
-               >
-                 Terminer
-               </button>
-             </div>
-          </Card>
-        );
-        
-      case 8:
-        return (
-          <div className="text-center max-w-lg mx-auto mt-12 animate-fade-in-up">
-            <div className="inline-flex items-center justify-center w-24 h-24 bg-green-100 rounded-full mb-6 border-4 border-white shadow-xl">
-              <CheckCircle2 size={48} className="text-green-600" />
-            </div>
-            <h2 className="text-3xl font-bold text-slate-900 mb-4">Analyse Terminée</h2>
-            <p className="text-slate-600 mb-8 text-lg">
-              Merci pour votre participation. Vos réponses ont été enregistrées pour le débriefing collectif.
-            </p>
-            <div className="bg-white p-6 rounded-lg border border-slate-200 text-left mb-8 shadow-md">
-               <h4 className="font-bold text-slate-900 mb-4 border-b pb-2">Résumé de votre évolution :</h4>
-               <div className="text-xs font-bold uppercase text-slate-500 mb-1">Avant :</div>
-               <p className="mb-4 italic text-slate-700 bg-slate-50 p-3 rounded">"{answers.justifInit}"</p>
-               <div className="text-xs font-bold uppercase text-slate-500 mb-1">Après :</div>
-               <p className="italic text-slate-700 bg-green-50 p-3 rounded">"{answers.justifFinal}"</p>
-            </div>
-            
-            <button 
-               onClick={resetApp}
-               className="text-slate-500 hover:text-slate-800 underline text-sm font-medium"
-            >
-              Retour à l'accueil
-            </button>
-          </div>
-        )
-
-      default:
-        return null;
-    }
-  };
-
-  // --- LAYOUT ---
+  if (isAdmin) {
+    return (
+      <>
+        <AdminDashboard />
+        <button onClick={() => setIsAdmin(false)} className="fixed bottom-4 left-4 p-2 bg-slate-800 text-white rounded-full opacity-50 hover:opacity-100 z-50">
+          <LogOut size={16} />
+        </button>
+      </>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 pb-20 relative">
-      {/* Header */}
-      <header className="bg-slate-900 text-white shadow-md sticky top-0 z-10">
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans relative">
+      {/* Header User */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-30">
         <div className="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-3">
-            <div className="bg-yellow-400 p-1.5 rounded text-slate-900 shadow-sm">
-               <HardHat size={24} />
+          <div className="flex items-center gap-2 font-black tracking-tighter text-xl">
+            <div className="bg-yellow-400 w-8 h-8 flex items-center justify-center rounded text-slate-900">
+              <Activity size={20} />
             </div>
-            <div>
-                <h1 className="font-bold text-lg tracking-wider leading-tight">SÉCURITÉ BTP</h1>
-                <span className="text-xs text-slate-400 block uppercase tracking-widest">Formation Interactive</span>
-            </div>
+            SÉCURITÉ<span className="text-yellow-600">BTP</span>
           </div>
-          <div className="text-xs font-bold bg-slate-800 px-3 py-1 rounded-full text-yellow-400 border border-slate-700">
-            Étape {step > 8 ? 8 : step} / 7
-          </div>
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Formation Interactive</div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        {isAdmin ? (
-            <Card title="Administration" icon={Settings}>
-                <div className="space-y-6">
-                    {/* CONTROL PANEL */}
-                    <div className="p-4 bg-yellow-50 border border-yellow-200 rounded">
-                        <h3 className="font-bold mb-4 flex items-center gap-2 text-yellow-900"><Unlock size={20}/> Contrôle de séance</h3>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <button 
-                                onClick={() => toggleAppControl('showResults')}
-                                className={`p-4 rounded border-2 font-bold flex items-center justify-between transition-colors ${
-                                    appControl.showResults 
-                                    ? 'bg-green-100 border-green-500 text-green-800' 
-                                    : 'bg-white border-slate-300 text-slate-500'
-                                }`}
-                            >
-                                <span>1. Afficher Résultats Groupe</span>
-                                {appControl.showResults ? <Eye size={24}/> : <Eye size={24} className="opacity-30"/>}
-                            </button>
-
-                            <button 
-                                onClick={() => toggleAppControl('openFinalPhase')}
-                                className={`p-4 rounded border-2 font-bold flex items-center justify-between transition-colors ${
-                                    appControl.openFinalPhase 
-                                    ? 'bg-green-100 border-green-500 text-green-800' 
-                                    : 'bg-white border-slate-300 text-slate-500'
-                                }`}
-                            >
-                                <span>2. Débloquer Auto-éval Finale</span>
-                                {appControl.openFinalPhase ? <PlayCircle size={24}/> : <PauseCircle size={24} className="opacity-30"/>}
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="p-4 bg-slate-100 rounded border">
-                        <h3 className="font-bold mb-4 flex items-center gap-2"><ImageIcon size={18}/> Configuration Scénario</h3>
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium mb-1">Titre</label>
-                                <input 
-                                    type="text" 
-                                    className="w-full p-2 border rounded" 
-                                    value={adminConfig.title} 
-                                    onChange={e => setAdminConfig({...adminConfig, title: e.target.value})}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium mb-1">Description</label>
-                                <textarea 
-                                    className="w-full p-2 border rounded min-h-[100px]" 
-                                    value={adminConfig.description} 
-                                    onChange={e => setAdminConfig({...adminConfig, description: e.target.value})}
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium mb-1">URL Image</label>
-                                <input 
-                                    type="text" 
-                                    className="w-full p-2 border rounded" 
-                                    placeholder="https://..."
-                                    value={adminConfig.imageUrl} 
-                                    onChange={e => setAdminConfig({...adminConfig, imageUrl: e.target.value})}
-                                />
-                            </div>
-                            <button onClick={saveConfiguration} className="bg-slate-900 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-slate-800">
-                                <Save size={16} /> Sauvegarder Config
-                            </button>
-                        </div>
-                    </div>
-
-                    <div className="p-4 bg-red-50 border border-red-200 rounded">
-                        <h3 className="font-bold text-red-800 mb-2 flex items-center gap-2"><Trash2 size={18}/> Zone de Danger</h3>
-                        <p className="text-sm text-red-600 mb-4">Efface toutes les réponses et réinitialise les verrous.</p>
-                        <button onClick={clearDatabase} className="bg-red-600 text-white px-4 py-2 rounded flex items-center gap-2 hover:bg-red-700 w-full justify-center">
-                            <Trash2 size={16} /> Réinitialiser la session
-                        </button>
-                    </div>
-
-                    <div className="border-t pt-4 text-center">
-                        <button onClick={() => setIsAdmin(false)} className="text-slate-600 underline hover:text-slate-900">Quitter le mode Admin</button>
-                    </div>
-                </div>
-            </Card>
+      <main>
+        {activeEvalData ? (
+          <UserPlayer evalData={activeEvalData} user={user} />
         ) : (
-            renderStep()
+          <WaitingScreen />
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="text-center text-slate-400 text-xs py-6 border-t border-slate-200 mt-auto">
-        <p className="mb-3">Application Pédagogique - BTP Module 1</p>
-        <button 
-            onClick={() => setShowAdminLogin(true)} 
-            className="text-slate-300 hover:text-slate-500 transition-colors flex items-center justify-center gap-1 mx-auto"
-        >
-            <Lock size={12} /> Admins
+      {/* Admin Trigger */}
+      <footer className="py-8 text-center">
+        <button onClick={() => setShowLogin(true)} className="text-slate-300 hover:text-slate-400 transition-colors">
+          <Lock size={16} />
         </button>
       </footer>
 
-      {/* Modal Login */}
-      {showAdminLogin && !isAdmin && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in-up">
-            <div className="bg-white rounded-xl p-8 max-w-sm w-full shadow-2xl border border-slate-200">
-                <div className="flex justify-center mb-6">
-                    <div className="bg-yellow-400 p-3 rounded-full">
-                        <Settings size={32} className="text-slate-900"/>
-                    </div>
-                </div>
-                <h3 className="font-bold text-xl mb-6 text-center text-slate-900">Espace Animateur</h3>
-                <form onSubmit={handleAdminLogin}>
-                    <input 
-                        type="password" 
-                        placeholder="Mot de passe" 
-                        className="w-full p-3 border-2 border-slate-200 rounded-lg mb-4 outline-none focus:border-yellow-400 transition-colors text-center text-lg"
-                        autoFocus
-                        value={adminPassword}
-                        onChange={(e) => setAdminPassword(e.target.value)}
-                    />
-                    <div className="flex flex-col gap-3">
-                        <button 
-                            type="submit" 
-                            className="w-full py-3 bg-slate-900 text-white rounded-lg hover:bg-slate-800 font-bold shadow-lg transform transition active:scale-95"
-                        >
-                            Connexion
-                        </button>
-                        <button 
-                            type="button" 
-                            onClick={() => setShowAdminLogin(false)}
-                            className="w-full py-3 text-slate-500 hover:text-slate-800 font-medium"
-                        >
-                            Annuler
-                        </button>
-                    </div>
-                </form>
-            </div>
+      {/* Login Modal */}
+      {showLogin && (
+        <div className="fixed inset-0 bg-slate-900/90 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl p-8 w-full max-w-sm shadow-2xl">
+            <h3 className="text-xl font-bold mb-6 text-center">Accès Formateur</h3>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <input 
+                type="password" 
+                autoFocus
+                placeholder="Mot de passe"
+                className="w-full p-3 border-2 border-slate-200 rounded-xl text-center text-lg focus:border-yellow-400 outline-none transition-colors"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <button type="button" onClick={() => setShowLogin(false)} className="py-3 font-bold text-slate-500 hover:bg-slate-50 rounded-xl">Annuler</button>
+                <button type="submit" className="py-3 bg-slate-900 text-white font-bold rounded-xl hover:bg-slate-800 shadow-lg">Entrer</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>
