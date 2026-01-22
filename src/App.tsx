@@ -875,7 +875,7 @@ export default function App() {
             onClick={() => setShowAdminLogin(true)} 
             className="text-slate-300 hover:text-slate-500 transition-colors flex items-center justify-center gap-1 mx-auto"
         >
-            <Lock size={12} /> Admin
+            <Lock size={12} /> Admins
         </button>
       </footer>
 
