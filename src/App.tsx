@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 
 // Imports Firebase standards
-import { initializeApp, type FirebaseApp } from 'firebase/app';
+import { initializeApp, type FirebaseApp, getApp, getApps } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, type User, type Auth } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -49,12 +49,12 @@ import {
 // --- GLOBAL DECLARATION ---
 declare const __app_id: string | undefined;
 declare const __initial_auth_token: string | undefined;
+declare const __firebase_config: string | undefined; // Assuming this might be injected
 
 // --- CONFIGURATION FIREBASE ---
-// Note: In a real app, use environment variables. 
-// This config matches the provided one but ensure it's correct for your project.
+// Use the provided config directly.
 const firebaseConfig = {
-  apiKey: "", // The environment will provide the API key logic or it should be filled if external
+  apiKey: "AIzaSyD1Zd2nL59GJRC5CE4r6X-S2y6eQvj8aHg",
   authDomain: "rt2---formatrice.firebaseapp.com",
   projectId: "rt2---formatrice",
   storageBucket: "rt2---formatrice.firebasestorage.app",
@@ -63,50 +63,38 @@ const firebaseConfig = {
   measurementId: "G-00RZDNZSF5"
 };
 
-// Initialisation - Using existing app if available to prevent re-initialization errors
-// In some environments, multiple initializations might occur.
+// --- INITIALISATION FIREBASE (Sécurisée) ---
+// Initialize Firebase synchronously to avoid top-level await issues.
 let app: FirebaseApp;
 let auth: Auth;
 let db: Firestore;
 
 try {
-    app = initializeApp(firebaseConfig);
+    // Check if any app is already initialized
+    if (getApps().length > 0) {
+        app = getApp();
+    } else {
+        app = initializeApp(firebaseConfig);
+    }
     auth = getAuth(app);
     db = getFirestore(app);
 } catch (e) {
-    // Fallback logic handled synchronously or via a specific pattern if needed, 
-    // but top-level await is removed to fix build error.
-    // Ideally, check if app is already initialized.
-    console.warn("Firebase initialization warning (might be re-initialized):", e);
-    // Re-attempting strictly is risky without 'getApp', but standard initializeApp is usually safe 
-    // if guarded properly in the environment. Here we assume standard flow works or throws.
-    // For TypeScript safety in this snippet scope:
-    // We will assume initialization succeeds for the demo.
-    // If we really needed existing app:
-    // app = getApp(); // This import would need to be standard, not dynamic top-level await.
-    throw e; // Re-throw if critical
+    console.error("Firebase initialization error:", e);
+    // If initialization fails, we might be in a very strange state or config is wrong.
+    // We'll throw to make it visible, but in a real app you might want a fallback UI.
+    throw e;
 }
 
+// --- GESTION DE L'ID APPLICATION ---
+const RAW_APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'safety-app-default';
+const APP_ID = RAW_APP_ID.replace(/[\/.]/g, '_'); // Remplace / et . par _
 
-// ID de l'application
-// Use a fallback if __app_id is not defined
-const APP_ID = typeof __app_id !== 'undefined' ? __app_id : 'safety-app-react-standard';
-
-// CONSTANTS FOR COLLECTIONS
+// CONSTANTES COLLECTIONS
 const RESPONSES_COLLECTION = 'responses';
-const CONFIG_COLLECTION_NAME = 'config'; // Changed variable name to avoid confusion
+const CONFIG_COLLECTION_NAME = 'config';
 
-// Helpers Firestore - CORRECTED PATHS
-// Public Data Path: artifacts/{appId}/public/data/{collectionName}
-// For documents inside a collection, we need to be careful.
-
-// Responses are in a collection:
+// --- HELPERS FIRESTORE ---
 const getResponsesRef = () => collection(db, 'artifacts', APP_ID, 'public', 'data', RESPONSES_COLLECTION);
-
-// Config documents (scenario, control) need to be in a collection.
-// Let's use a collection named 'config' inside 'data'.
-// Path: artifacts/{appId}/public/data/config (collection) -> scenario (doc)
-const getConfigCollectionRef = () => collection(db, 'artifacts', APP_ID, 'public', 'data', CONFIG_COLLECTION_NAME);
 const getScenarioDocRef = () => doc(db, 'artifacts', APP_ID, 'public', 'data', CONFIG_COLLECTION_NAME, 'scenario');
 const getControlDocRef = () => doc(db, 'artifacts', APP_ID, 'public', 'data', CONFIG_COLLECTION_NAME, 'control');
 
@@ -352,9 +340,9 @@ export default function App() {
       if (docSnap.exists()) {
         const data = docSnap.data() as Partial<ScenarioConfig>;
         const newConfig = {
-            title: data.title || "Chantier de rénovation intérieure",
-            description: data.description || "Vous percez un mur pour fixer un support métallique.\n\nNote : D'autres corps de métier sont présents à proximité (électricien, peintre).",
-            imageUrl: data.imageUrl || ""
+            title: typeof data.title === 'string' ? data.title : "Chantier de rénovation intérieure",
+            description: typeof data.description === 'string' ? data.description : "Vous percez un mur pour fixer un support métallique.\n\nNote : D'autres corps de métier sont présents à proximité (électricien, peintre).",
+            imageUrl: typeof data.imageUrl === 'string' ? data.imageUrl : ""
         };
         setScenarioConfig(newConfig);
         setAdminConfig(newConfig);
