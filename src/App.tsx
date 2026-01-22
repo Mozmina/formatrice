@@ -464,6 +464,7 @@ export default function App() {
               </div>
               <button 
                 onClick={nextStep}
+                style={{ backgroundColor: '#FACC15', color: '#0F172A' }} // FORCE STYLE YELLOW
                 className="w-full bg-yellow-400 text-slate-900 py-4 rounded-lg font-bold text-lg shadow-md hover:bg-yellow-500 transition-colors flex items-center justify-center gap-2"
               >
                 Commencer l'analyse <ArrowRight size={24} />
