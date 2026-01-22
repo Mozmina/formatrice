@@ -1,28 +1,22 @@
-import { useState, useEffect, useMemo, type ReactNode } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Activity, 
-  ArrowRight,
+  ArrowRight, 
   CheckCircle2, 
-  AlertTriangle, 
   Settings, 
-  Plus,
-  Trash2,
-  Save,
-  Lock,
-  Unlock,
-  Eye,
-  FileText,
-  Image as ImageIcon,
-  BarChart3,
-  HelpCircle,
-  Play,
-  Pause,
-  MoreVertical,
-  ChevronRight,
-  LayoutList,
-  UserCheck,
-  Users,
-  LogOut,
+  Plus, 
+  Trash2, 
+  Save, 
+  Lock, 
+  Image as ImageIcon, 
+  BarChart3, 
+  HelpCircle, 
+  Play, 
+  Pause, 
+  LayoutList, 
+  UserCheck, 
+  Users, 
+  LogOut, 
   ArrowLeft
 } from 'lucide-react';
 
@@ -35,11 +29,8 @@ import {
   doc, 
   setDoc,
   onSnapshot, 
-  deleteDoc, 
-  getDoc,
-  getDocs,
-  type Firestore,
-  type DocumentData
+  getDoc, 
+  type Firestore 
 } from 'firebase/firestore';
 
 // --- CONFIGURATION ---
@@ -128,16 +119,6 @@ interface Evaluation {
   title: string;
   createdAt: string;
   steps: Step[];
-}
-
-interface GlobalState {
-  activeEvaluationId: string | null;
-}
-
-interface UserResponse {
-  evaluationId: string;
-  userId: string;
-  answers: Record<string, any>; // stepId -> value
 }
 
 // --- UTILS ---
@@ -928,7 +909,7 @@ export default function App() {
             <div className="bg-yellow-400 w-8 h-8 flex items-center justify-center rounded text-slate-900">
               <Activity size={20} />
             </div>
-            BTP CFA<span className="text-yellow-600">MARNE</span>
+            SÉCURITÉ<span className="text-yellow-600">BTP</span>
           </div>
           <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Formation Interactive</div>
         </div>
