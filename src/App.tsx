@@ -137,51 +137,57 @@ const StepIcon = ({ type, size=20 }: { type: StepType, size?: number }) => {
 
 const Timeline = ({ steps, activeStepId, onSelect, onMove, onDelete, onAdd }: any) => {
   return (
-    <div className="relative">
-      {/* Ligne connectrice */}
-      <div className="absolute top-1/2 left-0 right-0 h-1 bg-slate-200 -translate-y-1/2 z-0"></div>
-      
-      <div className="flex gap-4 overflow-x-auto py-6 px-2 relative z-10 timeline-scroll items-center">
-        {steps.map((step: Step, idx: number) => (
-          <div key={step.id} className="group relative flex flex-col items-center flex-shrink-0">
-            <button
-              onClick={() => onSelect(step.id)}
-              className={`w-12 h-12 rounded-full flex items-center justify-center border-4 transition-all shadow-sm ${
-                activeStepId === step.id 
-                  ? 'bg-white border-slate-800 scale-110 shadow-lg' 
-                  : 'bg-slate-50 border-slate-300 hover:border-slate-400'
-              }`}
-            >
-              <StepIcon type={step.type} />
-            </button>
-            <div className="absolute -top-8 bg-slate-800 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">
-              {idx + 1}. {step.title}
-            </div>
-            
-            {/* Controls miniature */}
-            {activeStepId === step.id && (
-              <div className="absolute -bottom-10 flex gap-1 bg-white shadow rounded-full p-1">
-                <button onClick={(e) => { e.stopPropagation(); onMove(idx, -1); }} disabled={idx === 0} className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"><ArrowLeft size={12}/></button>
-                <button onClick={(e) => { e.stopPropagation(); onDelete(idx); }} className="p-1 hover:bg-red-50 text-red-500 rounded"><Trash2 size={12}/></button>
-                <button onClick={(e) => { e.stopPropagation(); onMove(idx, 1); }} disabled={idx === steps.length - 1} className="p-1 hover:bg-slate-100 rounded disabled:opacity-30"><ArrowRight size={12}/></button>
+    <div className="flex items-center w-full">
+      {/* Zone de défilement des étapes */}
+      <div className="flex-1 overflow-x-auto py-6 px-2 timeline-scroll relative">
+        <div className="flex gap-4 items-center relative z-10 min-w-max">
+          {/* Ligne connectrice (derrière les étapes) */}
+          <div className="absolute top-1/2 left-0 right-4 h-1 bg-slate-200 -translate-y-1/2 z-0"></div>
+          
+          {steps.map((step: Step, idx: number) => (
+            <div key={step.id} className="group relative flex flex-col items-center flex-shrink-0 z-10">
+              <button
+                onClick={() => onSelect(step.id)}
+                className={`w-12 h-12 rounded-full flex items-center justify-center border-4 transition-all shadow-sm relative z-20 ${
+                  activeStepId === step.id 
+                    ? 'bg-white border-slate-800 scale-110 shadow-lg' 
+                    : 'bg-slate-50 border-slate-300 hover:border-slate-400'
+                }`}
+              >
+                <StepIcon type={step.type} />
+              </button>
+              
+              {/* Infobulle (Tooltip) */}
+              <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-30 shadow-lg">
+                {idx + 1}. {step.title}
+                <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
               </div>
-            )}
-          </div>
-        ))}
+              
+              {/* Controls miniature */}
+              {activeStepId === step.id && (
+                <div className="absolute -bottom-10 flex gap-1 bg-white shadow-md border border-slate-100 rounded-full p-1 z-30">
+                  <button onClick={(e) => { e.stopPropagation(); onMove(idx, -1); }} disabled={idx === 0} className="p-1 hover:bg-slate-100 rounded disabled:opacity-30 text-slate-600"><ArrowLeft size={12}/></button>
+                  <button onClick={(e) => { e.stopPropagation(); onDelete(idx); }} className="p-1 hover:bg-red-50 text-red-500 rounded"><Trash2 size={12}/></button>
+                  <button onClick={(e) => { e.stopPropagation(); onMove(idx, 1); }} disabled={idx === steps.length - 1} className="p-1 hover:bg-slate-100 rounded disabled:opacity-30 text-slate-600"><ArrowRight size={12}/></button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
 
-        {/* Bouton Ajouter */}
-        <div className="relative group">
-          <button className="w-10 h-10 rounded-full bg-slate-200 hover:bg-slate-300 flex items-center justify-center transition-colors border-2 border-dashed border-slate-400 text-slate-500">
-            <Plus size={20} />
-          </button>
-          {/* Menu déroulant au survol/clic pour ajouter */}
-          <div className="absolute left-0 top-full mt-2 bg-white rounded-lg shadow-xl border border-slate-200 p-2 hidden group-hover:block w-48 z-20">
-            <p className="text-xs font-bold text-slate-400 mb-2 uppercase px-2">Ajouter une étape</p>
-            <button onClick={() => onAdd('situation')} className="w-full text-left p-2 hover:bg-blue-50 text-slate-700 rounded flex items-center gap-2 text-sm"><ImageIcon size={16} /> Situation</button>
-            <button onClick={() => onAdd('question')} className="w-full text-left p-2 hover:bg-yellow-50 text-slate-700 rounded flex items-center gap-2 text-sm"><HelpCircle size={16} /> Question</button>
-            <button onClick={() => onAdd('self-eval')} className="w-full text-left p-2 hover:bg-purple-50 text-slate-700 rounded flex items-center gap-2 text-sm"><UserCheck size={16} /> Auto-Éval</button>
-            <button onClick={() => onAdd('results')} className="w-full text-left p-2 hover:bg-green-50 text-slate-700 rounded flex items-center gap-2 text-sm"><BarChart3 size={16} /> Résultats</button>
-          </div>
+      {/* Bouton Ajouter (Hors du scroll pour éviter le clipping) */}
+      <div className="relative group pl-4 border-l border-slate-200 ml-2 flex-shrink-0 z-50">
+        <button className="w-10 h-10 rounded-full bg-slate-100 hover:bg-yellow-400 hover:text-slate-900 flex items-center justify-center transition-colors border-2 border-dashed border-slate-300 text-slate-400 shadow-sm">
+          <Plus size={20} />
+        </button>
+        {/* Menu déroulant */}
+        <div className="absolute right-0 top-full mt-2 bg-white rounded-lg shadow-xl border border-slate-200 p-2 hidden group-hover:block w-48 z-50 transform origin-top-right">
+          <p className="text-xs font-bold text-slate-400 mb-2 uppercase px-2">Ajouter une étape</p>
+          <button onClick={() => onAdd('situation')} className="w-full text-left p-2 hover:bg-blue-50 text-slate-700 rounded flex items-center gap-2 text-sm transition-colors"><ImageIcon size={16} /> Situation</button>
+          <button onClick={() => onAdd('question')} className="w-full text-left p-2 hover:bg-yellow-50 text-slate-700 rounded flex items-center gap-2 text-sm transition-colors"><HelpCircle size={16} /> Question</button>
+          <button onClick={() => onAdd('self-eval')} className="w-full text-left p-2 hover:bg-purple-50 text-slate-700 rounded flex items-center gap-2 text-sm transition-colors"><UserCheck size={16} /> Auto-Éval</button>
+          <button onClick={() => onAdd('results')} className="w-full text-left p-2 hover:bg-green-50 text-slate-700 rounded flex items-center gap-2 text-sm transition-colors"><BarChart3 size={16} /> Résultats</button>
         </div>
       </div>
     </div>
@@ -196,7 +202,7 @@ const StepEditor = ({ step, onChange }: { step: Step, onChange: (s: Step) => voi
   };
 
   return (
-    <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 animate-fade-in">
+    <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 animate-fade-in relative z-0">
       <div className="flex items-center gap-2 mb-6 pb-4 border-b border-slate-100">
         <StepIcon type={step.type} size={24} />
         <h3 className="text-lg font-bold text-slate-800 uppercase tracking-wide">Édition : {step.type}</h3>
@@ -431,7 +437,7 @@ const AdminDashboard = () => {
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-800">
       {/* SIDEBAR */}
-      <div className="w-64 bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800 flex-shrink-0">
+      <div className="w-64 bg-slate-900 text-slate-300 flex flex-col border-r border-slate-800 flex-shrink-0 relative z-40">
         <div className="p-4 border-b border-slate-800 font-bold text-white flex items-center gap-2">
           <Settings className="text-yellow-400" /> ADMIN
         </div>
@@ -467,11 +473,11 @@ const AdminDashboard = () => {
       </div>
 
       {/* MAIN AREA */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden">
+      <div className="flex-1 flex flex-col h-full overflow-hidden relative z-0">
         {selectedEval ? (
           <>
             {/* HEADER */}
-            <div className="bg-white border-b border-slate-200 p-4 flex justify-between items-center shadow-sm z-20">
+            <div className="bg-white border-b border-slate-200 p-4 flex justify-between items-center shadow-sm relative z-30">
               <div className="flex items-center gap-4">
                 <input 
                   value={selectedEval.title} 
@@ -499,7 +505,7 @@ const AdminDashboard = () => {
             </div>
 
             {/* TIMELINE */}
-            <div className="bg-slate-100 border-b border-slate-200 p-4 shadow-inner relative z-10">
+            <div className="bg-slate-100 border-b border-slate-200 p-4 shadow-inner relative z-20">
               <Timeline 
                 steps={selectedEval.steps} 
                 activeStepId={activeStepId} 
@@ -511,7 +517,7 @@ const AdminDashboard = () => {
             </div>
 
             {/* EDITOR */}
-            <div className="flex-1 overflow-y-auto p-8">
+            <div className="flex-1 overflow-y-auto p-8 relative z-0">
               <div className="max-w-3xl mx-auto">
                 {activeStepId ? (
                   <StepEditor 
@@ -909,7 +915,7 @@ export default function App() {
             <div className="bg-yellow-400 w-8 h-8 flex items-center justify-center rounded text-slate-900">
               <Activity size={20} />
             </div>
-            BTP CFA<span className="text-yellow-600">MARNE</span>
+            SÉCURITÉ<span className="text-yellow-600">BTP</span>
           </div>
           <div className="text-xs font-bold text-slate-400 uppercase tracking-widest">Formation Interactive</div>
         </div>
