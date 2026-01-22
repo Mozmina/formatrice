@@ -1,14 +1,27 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fr">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Evaluation Formatrice - PowerFormaeurs</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <title>Évaluation Formatrice - Sécurité BTP</title>
+    
+    <!-- Script Tailwind CSS v3 pour garantir l'affichage des couleurs (bg-slate-50, etc.) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        .animate-fade-in-up {
+            animation: fadeInUp 0.5s ease-out forwards;
+        }
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
   </head>
-  <body>
+  <body class="bg-slate-50 text-slate-900 antialiased">
     <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <!-- Point d'entrée de l'application (adapté pour TypeScript) -->
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
