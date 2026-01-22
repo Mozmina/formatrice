@@ -178,11 +178,16 @@ const Timeline = ({ steps, activeStepId, onSelect, onMove, onDelete, onAdd }: an
 
       {/* Bouton Ajouter (Hors du scroll pour éviter le clipping) */}
       <div className="relative group pl-4 border-l border-slate-200 ml-2 flex-shrink-0 z-50">
-        <button className="w-10 h-10 rounded-full bg-slate-100 hover:bg-yellow-400 hover:text-slate-900 flex items-center justify-center transition-colors border-2 border-dashed border-slate-300 text-slate-400 shadow-sm">
+        <button className="w-10 h-10 rounded-full bg-slate-100 hover:bg-yellow-400 hover:text-slate-900 flex items-center justify-center transition-colors border-2 border-dashed border-slate-300 text-slate-400 shadow-sm relative z-50">
           <Plus size={20} />
         </button>
+        
+        {/* Zone de survol invisible pour faire le pont entre le bouton et le menu */}
+        <div className="absolute right-0 top-0 h-full w-20 bg-transparent -z-10 group-hover:block hidden"></div>
+        <div className="absolute right-0 top-full h-4 w-full bg-transparent group-hover:block hidden"></div>
+
         {/* Menu déroulant */}
-        <div className="absolute right-0 top-full mt-2 bg-white rounded-lg shadow-xl border border-slate-200 p-2 hidden group-hover:block w-48 z-50 transform origin-top-right">
+        <div className="absolute right-0 top-full mt-2 bg-white rounded-lg shadow-xl border border-slate-200 p-2 hidden group-hover:block w-48 z-50 transform origin-top-right animate-fade-in">
           <p className="text-xs font-bold text-slate-400 mb-2 uppercase px-2">Ajouter une étape</p>
           <button onClick={() => onAdd('situation')} className="w-full text-left p-2 hover:bg-blue-50 text-slate-700 rounded flex items-center gap-2 text-sm transition-colors"><ImageIcon size={16} /> Situation</button>
           <button onClick={() => onAdd('question')} className="w-full text-left p-2 hover:bg-yellow-50 text-slate-700 rounded flex items-center gap-2 text-sm transition-colors"><HelpCircle size={16} /> Question</button>
