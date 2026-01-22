@@ -499,7 +499,7 @@ const AdminDashboard = () => {
             </div>
 
             {/* TIMELINE */}
-            <div className="bg-slate-100 border-b border-slate-200 p-4 shadow-inner">
+            <div className="bg-slate-100 border-b border-slate-200 p-4 shadow-inner relative z-10">
               <Timeline 
                 steps={selectedEval.steps} 
                 activeStepId={activeStepId} 
